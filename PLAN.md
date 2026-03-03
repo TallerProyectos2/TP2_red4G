@@ -1,0 +1,712 @@
+# PLAN DE DESPLIEGUE Y PRUEBAS
+
+## 1. Objetivo
+
+Montar y validar un sistema completo de vehiculo conectado con estos cuatro elementos:
+
+- PC `EPC`: core LTE y nodo central de aplicacion
+- PC `eNodeB`: acceso radio LTE con `bladeRF`
+- `Jetson`: inferencia del modelo IA
+- `Coche`: captura de camara, envio de frames y ejecucion de comandos
+
+La estrategia es montar el sistema por capas, validando cada bloque antes de pasar al siguiente:
+
+1. Red LTE estable
+2. Servicios base en el EPC
+3. Inferencia en la Jetson
+4. Agente del coche
+5. Integracion extremo a extremo
+6. Endurecimiento y demo
+
+---
+
+## 2. Reparto de servicios por maquina
+
+## 2.1 PC EPC
+
+Este equipo es el centro del sistema. Aqui va la red 4G y toda la logica de aplicacion no GPU.
+
+### Servicios de host
+
+- `srsepc`
+  - Funciones: `MME + HSS + SPGW`
+  - Gestion del registro LTE del UE
+  - Asignacion de IP al coche
+  - Salida del trafico del UE hacia servicios internos y externos
+
+- `IP forwarding`
+  - Permite enrutar trafico entre interfaces
+
+- `NAT`
+  - Reglas con `iptables` o `nftables`
+  - Permite salida del UE hacia otras redes si hace falta
+
+- `dnsmasq`
+  - DNS ligero para el UE
+  - Resolucion interna y reenvio externo
+
+- `almacenamiento local`
+  - Guardado de frames, logs de pruebas y datos auxiliares
+  - Ruta recomendada: `/srv/tp2/`
+
+### Servicios en Docker
+
+- `backend-api`
+  - `FastAPI`
+  - Recibe frames del coche
+  - Recibe telemetria
+  - Guarda metadatos
+  - Llama a la Jetson para inferencia
+  - Decide el comando final
+  - Publica comandos por MQTT
+
+- `mosquitto`
+  - Broker MQTT
+  - Control y estado del coche
+
+- `postgres`
+  - Base de datos principal
+  - Guarda sesiones, telemetria, detecciones, comandos y eventos
+
+### Puertos relevantes
+
+- `36412/SCTP`: S1-MME
+- `2152/UDP`: GTP-U
+- `53/TCP,UDP`: DNS
+- `8000/TCP`: API del backend
+- `1883/TCP`: MQTT
+- `5432/TCP`: PostgreSQL (solo red interna)
+
+---
+
+## 2.2 PC eNodeB
+
+Este equipo solo debe encargarse del acceso radio.
+
+### Servicios
+
+- `srsenb`
+  - Conexion S1 con el EPC
+  - Exposicion de la celda LTE
+
+- `bladeRF`
+  - SDR y sus drivers/herramientas
+
+### Regla de diseño
+
+- No instalar aqui backend
+- No instalar base de datos
+- No instalar MQTT
+- No instalar IA
+
+---
+
+## 2.3 Jetson
+
+La Jetson solo debe ejecutar el servicio de inferencia y nada mas.
+
+### Servicios
+
+- `inference-service`
+  - API HTTP minima
+  - Endpoint principal: `POST /infer`
+  - Endpoint de salud: `GET /health`
+  - Carga el modelo una sola vez al arrancar
+  - Devuelve:
+    - clase detectada
+    - confianza
+    - latencia
+
+### Tecnologias recomendadas
+
+- `Python 3`
+- `FastAPI`
+- `PyTorch`
+- `OpenCV`
+- `TensorRT` mas adelante si hace falta optimizar
+
+### Despliegue recomendado
+
+- Primero: `venv + systemd`
+- Docker en Jetson solo mas adelante, si el entorno CUDA queda estable
+
+---
+
+## 2.4 Coche
+
+El coche debe llevar un agente ligero, simple y robusto.
+
+### Procesos logicos
+
+- `camera-capture`
+  - Captura frames de la camara
+
+- `frame-uploader`
+  - Envia frames por HTTP al EPC
+
+- `mqtt-client`
+  - Recibe comandos
+  - Publica estado y acuses de recibo
+
+- `movement-adapter`
+  - Traduce comandos abstractos a llamadas a vuestros scripts actuales
+
+- `safety-watchdog`
+  - Si no llega orden nueva en un tiempo limite, el coche reduce velocidad o se para
+
+### Tecnologias recomendadas
+
+- `Python 3`
+- `OpenCV`
+- `requests` o `httpx`
+- `paho-mqtt`
+
+---
+
+## 3. Arquitectura funcional
+
+Flujo completo:
+
+1. El coche se registra en la red LTE
+2. El coche obtiene IP del EPC
+3. El coche envia un frame al backend del EPC
+4. El backend guarda el frame y registra el evento
+5. El backend envia el frame a la Jetson
+6. La Jetson responde con la deteccion
+7. El backend decide la accion
+8. El backend publica el comando por MQTT
+9. El coche recibe el comando y ejecuta movimiento
+10. El coche envia `ack` y telemetria
+11. El backend registra todo en la base de datos
+
+Reglas clave:
+
+- El coche no habla directamente con la Jetson
+- El eNodeB no ejecuta logica de aplicacion
+- El EPC no ejecuta inferencia IA
+- Las imagenes van por HTTP, no por MQTT
+- MQTT se usa para control, estado y telemetria ligera
+
+---
+
+## 4. Plan secuencial de despliegue y pruebas
+
+## Fase 0. Preparacion y congelacion de configuracion
+
+### Objetivo
+
+Dejar cerrados los parametros de red y las decisiones base antes de instalar mas piezas.
+
+### Tareas
+
+- Fijar IPs de cada equipo:
+  - `EPC <-> eNodeB`: `10.10.10.1/24` y `10.10.10.2/24`
+  - `SGi EPC`: `172.16.0.1/24`
+  - `Jetson`: IP fija en la red donde el EPC pueda alcanzarla
+
+- Dejar documentados:
+  - puertos de cada servicio
+  - nombres de host
+  - rutas de logs
+  - version de `srsRAN`
+  - version de `JetPack` y `PyTorch` en Jetson
+
+- Crear estructura base de directorios en el EPC:
+  - `/srv/tp2/frames`
+  - `/srv/tp2/logs`
+  - `/srv/tp2/docker`
+  - `/srv/tp2/config`
+
+### Validacion
+
+- Todos los equipos responden por red a quien les corresponde
+- Queda definida una tabla simple de IPs y servicios
+
+### No pasar de fase hasta que
+
+- Este cerrada la topologia de red
+
+---
+
+## Fase 1. Red LTE estable (EPC + eNodeB)
+
+### Objetivo
+
+Tener la red LTE funcionando de manera repetible y estable.
+
+### EPC: tareas
+
+- Revisar `epc.conf`
+- Confirmar:
+  - `mme_bind_addr = 10.10.10.1`
+  - `gtpu_bind_addr = 10.10.10.1`
+  - `sgi_if_addr = 172.16.0.1`
+  - `db_file` con ruta absoluta
+
+- Revisar `user_db.csv`
+  - Dejar al menos un UE correctamente provisionado
+
+- Arrancar:
+  - `sudo srsepc /home/tp2/.config/srsran/epc.conf`
+
+### eNodeB: tareas
+
+- Revisar `enb.conf`
+- Confirmar:
+  - `mme_addr = 10.10.10.1`
+  - `gtp_bind_addr = 10.10.10.2`
+  - `gtp_advertise_addr = 10.10.10.2`
+  - `s1c_bind_addr = 10.10.10.2`
+
+- Validar estado de `bladeRF`
+- Arrancar:
+  - `sudo srsenb /home/tp2/.config/srsran/enb.conf`
+
+### Pruebas
+
+- Desde EPC:
+  - `ping 10.10.10.2`
+- En la consola del EPC debe aparecer:
+  - `Received S1 Setup Request`
+  - `Sending S1 Setup Response`
+
+### No pasar de fase hasta que
+
+- El enlace S1 sea estable
+- El eNodeB no falle al arrancar
+
+---
+
+## Fase 2. Salida IP del UE (routing, NAT, DNS)
+
+### Objetivo
+
+Garantizar que el coche, una vez registrado como UE, puede llegar a los servicios del EPC.
+
+### EPC: tareas
+
+- Activar `IP forwarding`
+- Configurar NAT
+- Instalar y configurar `dnsmasq`
+- Confirmar que el trafico desde `172.16.0.0/24` puede salir por la interfaz correcta
+
+### Pruebas
+
+- Registrar el coche o un UE de prueba
+- Confirmar que obtiene IP `172.16.0.x`
+- Probar:
+  - `ping 172.16.0.1`
+  - resolucion DNS si se usa
+  - acceso HTTP a un servicio simple en el EPC
+
+### No pasar de fase hasta que
+
+- El UE tenga conectividad IP estable con el EPC
+
+---
+
+## Fase 3. Base del backend en el EPC
+
+### Objetivo
+
+Montar el esqueleto de servicios de aplicacion sin depender aun de la IA.
+
+### EPC: tareas
+
+- Instalar `Docker Engine`
+- Instalar `docker compose`
+- Crear `docker-compose.yml` en `/srv/tp2/docker`
+
+### Servicios iniciales
+
+- `mosquitto`
+- `postgres`
+- `backend-api` vacio o minimo
+
+### Requisitos del backend en esta fase
+
+- Endpoint `GET /health`
+- Endpoint `POST /v1/telemetry`
+- Endpoint `POST /v1/frames` que solo reciba y guarde la imagen
+
+### Pruebas
+
+- Desde el EPC:
+  - los contenedores arrancan
+  - `backend-api` responde en `/health`
+
+- Desde un cliente de prueba:
+  - publicar y suscribirse a MQTT
+  - insertar un registro de prueba en PostgreSQL
+  - subir un frame y que quede guardado en disco
+
+### No pasar de fase hasta que
+
+- El backend reciba un frame y lo guarde correctamente
+- MQTT y DB queden operativos
+
+---
+
+## Fase 4. Servicio de inferencia en la Jetson
+
+### Objetivo
+
+Tener el modelo IA encapsulado en un servicio independiente y verificable.
+
+### Jetson: tareas
+
+- Preparar entorno:
+  - `Python 3`
+  - `venv`
+  - dependencias del modelo
+
+- Implementar `inference-service`
+  - `GET /health`
+  - `POST /infer`
+
+- Cargar el modelo al arrancar
+- Dejar logs claros de:
+  - arranque
+  - carga de modelo
+  - tiempo por inferencia
+
+### Pruebas
+
+- Llamar a `/health` desde la Jetson
+- Llamar a `/infer` con una imagen local conocida
+- Medir tiempo de respuesta
+
+### Validacion funcional
+
+- El servicio devuelve:
+  - etiqueta
+  - confianza
+  - latencia
+
+### No pasar de fase hasta que
+
+- La Jetson procese una imagen de prueba de forma repetible
+
+---
+
+## Fase 5. Conexion EPC <-> Jetson
+
+### Objetivo
+
+Conectar el backend del EPC con la inferencia de la Jetson.
+
+### Tareas
+
+- Definir la IP fija de la Jetson
+- Abrir el puerto del `inference-service`
+- Configurar en el backend del EPC:
+  - URL del servicio de inferencia
+  - timeout
+  - reintentos controlados
+
+- Implementar en `backend-api`:
+  - recepcion de frame
+  - guardado del frame
+  - llamada a la Jetson
+  - persistencia del resultado
+
+### Pruebas
+
+- Subir un frame al backend del EPC
+- Verificar que el backend llama a la Jetson
+- Verificar que guarda en DB:
+  - ruta del frame
+  - resultado de IA
+  - confianza
+  - latencia
+
+### No pasar de fase hasta que
+
+- El EPC pueda completar la cadena:
+  - frame recibido -> inferencia -> resultado guardado
+
+---
+
+## Fase 6. Pipeline de control en el EPC (sin coche aun)
+
+### Objetivo
+
+Implementar la logica de decision y emision de comandos, aunque todavia se pruebe con clientes simulados.
+
+### Tareas
+
+- Definir acciones abstractas:
+  - `STOP`
+  - `SLOW`
+  - `LEFT`
+  - `RIGHT`
+  - `STRAIGHT`
+
+- Implementar tabla de traduccion:
+  - clase detectada -> accion
+
+- Implementar publicacion MQTT:
+  - topico `car/1/cmd`
+
+- Implementar almacenamiento en DB:
+  - deteccion
+  - accion emitida
+  - timestamp
+
+### Pruebas
+
+- Subir un frame de prueba
+- Verificar que el backend:
+  - recibe deteccion
+  - decide accion
+  - publica comando MQTT
+
+- Comprobar con un cliente MQTT de prueba que el mensaje llega correctamente
+
+### No pasar de fase hasta que
+
+- El backend publique comandos validos por MQTT
+
+---
+
+## Fase 7. Agente del coche (captura + HTTP + MQTT)
+
+### Objetivo
+
+Montar en el coche un agente ligero que pueda integrarse con los scripts existentes.
+
+### Tareas
+
+- Crear proceso `camera-capture`
+- Crear proceso `frame-uploader`
+- Crear `mqtt-client`
+- Crear `movement-adapter`
+- Crear `safety-watchdog`
+
+### Requisitos funcionales
+
+- El coche debe poder:
+  - enviar frames al EPC
+  - recibir comandos desde MQTT
+  - ejecutar movimientos usando vuestros scripts
+  - parar si no llegan ordenes nuevas a tiempo
+
+### Integracion con scripts existentes
+
+- No reescribir los scripts actuales de movimiento
+- Crear una capa adaptadora que invoque las funciones necesarias
+
+### Pruebas
+
+- El coche publica `status`
+- El coche recibe un comando MQTT manual
+- El coche ejecuta una accion simple
+- El coche sube un frame al backend
+
+### No pasar de fase hasta que
+
+- El coche pueda recibir un comando y actuar sin IA
+
+---
+
+## Fase 8. Integracion extremo a extremo
+
+### Objetivo
+
+Validar el sistema completo con todos los bloques conectados.
+
+### Secuencia de arranque recomendada
+
+1. Arrancar `srsepc`
+2. Arrancar `srsenb`
+3. Arrancar `docker compose` del EPC
+4. Arrancar `inference-service` en la Jetson
+5. Arrancar el agente del coche
+6. Registrar el coche en LTE
+
+### Flujo a verificar
+
+1. El coche envia un frame
+2. El EPC lo recibe
+3. El EPC lo manda a la Jetson
+4. La Jetson devuelve deteccion
+5. El EPC decide accion
+6. El EPC publica por MQTT
+7. El coche ejecuta el movimiento
+8. El coche envia `ack`
+9. El EPC registra el evento completo
+
+### Metricas a medir
+
+- Tiempo de subida del frame
+- Tiempo de inferencia
+- Tiempo de decision
+- Tiempo de recepcion del comando
+- Latencia total extremo a extremo
+
+### No pasar de fase hasta que
+
+- La cadena completa funcione al menos de forma estable a baja frecuencia
+
+---
+
+## Fase 9. Endurecimiento y seguridad funcional
+
+### Objetivo
+
+Hacer el sistema utilizable para demostracion, evitando estados peligrosos.
+
+### Tareas
+
+- Implementar limite de frecuencia de frames
+  - Recomendado: `2-5 fps`
+
+- Implementar politicas de fallback
+  - Si falla la Jetson: `SLOW` o `STOP`
+  - Si falla MQTT: `STOP`
+  - Si la confianza es baja: mantener accion segura
+
+- Añadir logs de auditoria
+  - errores de red
+  - errores de inferencia
+  - comandos emitidos
+  - tiempo de respuesta
+
+- Retencion de datos
+  - guardar muestras utiles, no todos los frames si satura disco
+
+### Pruebas
+
+- Simular caida de la Jetson
+- Simular perdida temporal de MQTT
+- Simular timeout de backend
+- Confirmar que el coche entra en modo seguro
+
+### No pasar de fase hasta que
+
+- El sistema tenga respuestas previsibles ante errores
+
+---
+
+## Fase 10. Preparacion de demo y operacion
+
+### Objetivo
+
+Dejar un procedimiento de arranque limpio y repetible para la presentacion.
+
+### Tareas
+
+- Preparar checklist de arranque
+- Preparar checklist de validacion
+- Preparar set de imagenes de prueba
+- Preparar una demo guiada:
+  - arranque de red
+  - conexion del coche
+  - envio de frame
+  - deteccion
+  - accion
+
+### Checklist de arranque
+
+1. Arrancar EPC
+2. Arrancar eNodeB
+3. Verificar S1
+4. Arrancar servicios Docker
+5. Arrancar Jetson
+6. Verificar `/health`
+7. Arrancar coche
+8. Verificar MQTT
+9. Hacer prueba de frame
+
+### Checklist de cierre
+
+1. Parar el coche
+2. Parar servicios de aplicacion
+3. Parar Jetson
+4. Parar eNodeB
+5. Parar EPC
+6. Guardar logs y evidencias
+
+---
+
+## 5. Orden exacto recomendado de implementacion
+
+Para evitar mezclar errores, el orden correcto es:
+
+1. Cerrar configuracion LTE (`EPC + eNodeB`)
+2. Confirmar conectividad IP del UE
+3. Montar `mosquitto + postgres + backend` en EPC
+4. Probar backend sin IA
+5. Montar servicio de inferencia en Jetson
+6. Conectar backend del EPC con Jetson
+7. Implementar decision y publicacion MQTT
+8. Implementar agente del coche
+9. Integrar extremo a extremo
+10. Endurecer y preparar demo
+
+Si aparece un fallo en una fase, no avanzar a la siguiente hasta dejar cerrada la anterior.
+
+---
+
+## 6. Entregables tecnicos por fase
+
+### Fase 1
+
+- Red LTE estable
+- Configuraciones `epc.conf` y `enb.conf` cerradas
+
+### Fase 2
+
+- UE con IP y salida correcta
+
+### Fase 3
+
+- `docker-compose.yml`
+- backend minimo operativo
+- MQTT operativo
+- DB operativa
+
+### Fase 4
+
+- servicio `/infer` en Jetson
+
+### Fase 5
+
+- backend llamando a Jetson y guardando resultados
+
+### Fase 6
+
+- comando MQTT emitido automaticamente
+
+### Fase 7
+
+- coche recibiendo y ejecutando comandos
+
+### Fase 8
+
+- pipeline completo funcionando
+
+### Fase 9
+
+- fallbacks y seguridad operativa
+
+### Fase 10
+
+- procedimiento reproducible de demo
+
+---
+
+## 7. Criterios de exito
+
+Se considera que el sistema esta listo cuando se cumplan estos puntos:
+
+- La red LTE arranca siempre sin reconfiguracion manual extra
+- El coche se registra como UE y obtiene IP
+- El coche puede enviar frames al backend del EPC
+- El backend puede pedir inferencia a la Jetson
+- La Jetson devuelve predicciones validas
+- El backend genera y publica comandos
+- El coche ejecuta comandos usando los scripts existentes
+- El sistema se para de forma segura cuando algo falla
+- Quedan registros de la actividad para demostrar el funcionamiento
+
