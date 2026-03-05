@@ -18,6 +18,10 @@ La estrategia es montar el sistema por capas, validando cada bloque antes de pas
 5. Integracion extremo a extremo
 6. Endurecimiento y demo
 
+Restriccion operativa global:
+
+- Bajo ningun concepto se puede actualizar el firmware de ningun componente del sistema durante este proyecto.
+
 ---
 
 ## 2. Reparto de servicios por maquina
@@ -191,6 +195,16 @@ Reglas clave:
 
 ## 4. Plan secuencial de despliegue y pruebas
 
+### Nota de alineacion con Jira
+
+- Este bloque define el orden cronologico global del proyecto.
+- Las subtareas por maquina mantienen su propia numeracion dentro de cada padre de Jira (`EPC-Fase 8`, `INT-Fase 11`, etc.).
+- Correspondencia nueva con las subtareas anadidas:
+  - `TP2-180` se ejecuta dentro de la Fase 2 global
+  - `TP2-181`, `TP2-182` y `TP2-183` se cierran dentro de la Fase 10 global
+  - `TP2-184` corresponde a la Fase 11 global
+  - `TP2-185` corresponde a la Fase 12 global
+
 ## Fase 0. Preparacion y congelacion de configuracion
 
 ### Objetivo
@@ -243,9 +257,6 @@ Tener la red LTE funcionando de manera repetible y estable.
   - `sgi_if_addr = 172.16.0.1`
   - `db_file` con ruta absoluta
 
-- Revisar `user_db.csv`
-  - Dejar al menos un UE correctamente provisionado
-
 - Arrancar:
   - `sudo srsepc /home/tp2/.config/srsran/epc.conf`
 
@@ -277,7 +288,34 @@ Tener la red LTE funcionando de manera repetible y estable.
 
 ---
 
-## Fase 2. Salida IP del UE (routing, NAT, DNS)
+## Fase 2. Provision del UE y politica de attach reproducible
+
+### Objetivo
+
+Dejar el alta del UE cerrada y repetible antes de depender del trafico IP del coche.
+
+### Tareas
+
+- Revisar `user_db.csv`
+- Dejar al menos un UE correctamente provisionado
+- Documentar los datos minimos necesarios para el alta real del abonado
+- Fijar el procedimiento operativo de attach para el coche o para un UE de prueba
+- Evitar dependencias de pasos implicitos o configuraciones a mano no documentadas
+
+### Pruebas
+
+- Registrar el coche o un UE de prueba en la red
+- Confirmar que el EPC muestra el attach de forma consistente
+- Verificar que el procedimiento puede repetirse sin reinterpretar la configuracion
+
+### No pasar de fase hasta que
+
+- Exista al menos un UE que pueda hacer attach de forma repetible
+- El procedimiento de alta y attach quede sin ambiguedad operativa
+
+---
+
+## Fase 3. Salida IP del UE (routing, NAT, DNS)
 
 ### Objetivo
 
@@ -292,8 +330,7 @@ Garantizar que el coche, una vez registrado como UE, puede llegar a los servicio
 
 ### Pruebas
 
-- Registrar el coche o un UE de prueba
-- Confirmar que obtiene IP `172.16.0.x`
+- Confirmar que el UE obtiene IP `172.16.0.x`
 - Probar:
   - `ping 172.16.0.1`
   - resolucion DNS si se usa
@@ -305,7 +342,7 @@ Garantizar que el coche, una vez registrado como UE, puede llegar a los servicio
 
 ---
 
-## Fase 3. Base del backend en el EPC
+## Fase 4. Base del backend en el EPC
 
 ### Objetivo
 
@@ -347,7 +384,7 @@ Montar el esqueleto de servicios de aplicacion sin depender aun de la IA.
 
 ---
 
-## Fase 4. Servicio de inferencia en la Jetson
+## Fase 5. Servicio de inferencia en la Jetson
 
 ### Objetivo
 
@@ -389,7 +426,7 @@ Tener el modelo IA encapsulado en un servicio independiente y verificable.
 
 ---
 
-## Fase 5. Conexion EPC <-> Jetson
+## Fase 6. Conexion EPC <-> Jetson
 
 ### Objetivo
 
@@ -427,7 +464,7 @@ Conectar el backend del EPC con la inferencia de la Jetson.
 
 ---
 
-## Fase 6. Pipeline de control en el EPC (sin coche aun)
+## Fase 7. Pipeline de control en el EPC (sin coche aun)
 
 ### Objetivo
 
@@ -469,7 +506,7 @@ Implementar la logica de decision y emision de comandos, aunque todavia se prueb
 
 ---
 
-## Fase 7. Agente del coche (captura + HTTP + MQTT)
+## Fase 8. Agente del coche (captura + HTTP + MQTT)
 
 ### Objetivo
 
@@ -509,7 +546,7 @@ Montar en el coche un agente ligero que pueda integrarse con los scripts existen
 
 ---
 
-## Fase 8. Integracion extremo a extremo
+## Fase 9. Integracion extremo a extremo
 
 ### Objetivo
 
@@ -519,10 +556,10 @@ Validar el sistema completo con todos los bloques conectados.
 
 1. Arrancar `srsepc`
 2. Arrancar `srsenb`
-3. Arrancar `docker compose` del EPC
-4. Arrancar `inference-service` en la Jetson
-5. Arrancar el agente del coche
-6. Registrar el coche en LTE
+3. Confirmar attach del UE y que obtiene IP `172.16.0.x`
+4. Arrancar `docker compose` del EPC
+5. Arrancar `inference-service` en la Jetson
+6. Arrancar el agente del coche
 
 ### Flujo a verificar
 
@@ -550,11 +587,11 @@ Validar el sistema completo con todos los bloques conectados.
 
 ---
 
-## Fase 9. Endurecimiento y seguridad funcional
+## Fase 10. Endurecimiento, supervision y seguridad funcional
 
 ### Objetivo
 
-Hacer el sistema utilizable para demostracion, evitando estados peligrosos.
+Hacer el sistema utilizable para demostracion, evitando estados peligrosos y dejando los servicios recuperables.
 
 ### Tareas
 
@@ -566,11 +603,18 @@ Hacer el sistema utilizable para demostracion, evitando estados peligrosos.
   - Si falla MQTT: `STOP`
   - Si la confianza es baja: mantener accion segura
 
-- Añadir logs de auditoria
-  - errores de red
-  - errores de inferencia
-  - comandos emitidos
-  - tiempo de respuesta
+- Definir supervision y arranque automatico de servicios clave
+  - `srsepc`
+  - `mosquitto`
+  - `postgres`
+  - `backend-api`
+  - `inference-service`
+  - agente del coche
+
+- Validar el modo degradado seguro del coche
+  - timeout de comandos
+  - parada segura
+  - no reutilizar ordenes antiguas
 
 - Retencion de datos
   - guardar muestras utiles, no todos los frames si satura disco
@@ -580,22 +624,49 @@ Hacer el sistema utilizable para demostracion, evitando estados peligrosos.
 - Simular caida de la Jetson
 - Simular perdida temporal de MQTT
 - Simular timeout de backend
+- Simular reinicio de un servicio critico
 - Confirmar que el coche entra en modo seguro
 
 ### No pasar de fase hasta que
 
 - El sistema tenga respuestas previsibles ante errores
+- Los servicios clave recuperen su estado de forma controlada
 
 ---
 
-## Fase 10. Preparacion de demo y operacion
+## Fase 11. Sincronizacion temporal y correlacion de logs
 
 ### Objetivo
 
-Dejar un procedimiento de arranque limpio y repetible para la presentacion.
+Hacer comparables los eventos entre EPC, Jetson y coche para medir y depurar la integracion real.
 
 ### Tareas
 
+- Fijar un mecanismo comun de sincronizacion temporal
+- Definir el formato de timestamps
+- Alinear logs de EPC, Jetson y coche sobre una misma referencia temporal
+- Dejar documentado el criterio de deriva aceptable entre nodos
+
+### Pruebas
+
+- Comparar tiempos entre los nodos y verificar que la deriva esta dentro del margen definido
+- Ejecutar una prueba simple y correlacionar el mismo evento en los tres equipos
+
+### No pasar de fase hasta que
+
+- Los eventos puedan compararse entre maquinas sin ambiguedad temporal
+
+---
+
+## Fase 12. Observabilidad minima, trazabilidad y preparacion de demo
+
+### Objetivo
+
+Dejar un procedimiento de arranque limpio y una traza minima del sistema para la presentacion y para el diagnostico final.
+
+### Tareas
+
+- Definir evidencias minimas del pipeline extremo a extremo
 - Preparar checklist de arranque
 - Preparar checklist de validacion
 - Preparar set de imagenes de prueba
@@ -611,12 +682,13 @@ Dejar un procedimiento de arranque limpio y repetible para la presentacion.
 1. Arrancar EPC
 2. Arrancar eNodeB
 3. Verificar S1
-4. Arrancar servicios Docker
-5. Arrancar Jetson
-6. Verificar `/health`
-7. Arrancar coche
-8. Verificar MQTT
-9. Hacer prueba de frame
+4. Verificar attach del UE e IP
+5. Arrancar servicios Docker
+6. Arrancar Jetson
+7. Verificar `/health`
+8. Arrancar coche
+9. Verificar MQTT y trazas basicas
+10. Hacer prueba de frame
 
 ### Checklist de cierre
 
@@ -627,28 +699,43 @@ Dejar un procedimiento de arranque limpio y repetible para la presentacion.
 5. Parar EPC
 6. Guardar logs y evidencias
 
+### No pasar de fase hasta que
+
+- Exista un procedimiento reproducible de arranque, validacion y cierre
+- Una prueba completa deje evidencias suficientes de lo ocurrido
+
 ---
 
 ## 5. Orden exacto recomendado de implementacion
 
 Para evitar mezclar errores, el orden correcto es:
 
-1. Cerrar configuracion LTE (`EPC + eNodeB`)
-2. Confirmar conectividad IP del UE
-3. Montar `mosquitto + postgres + backend` en EPC
-4. Probar backend sin IA
-5. Montar servicio de inferencia en Jetson
-6. Conectar backend del EPC con Jetson
-7. Implementar decision y publicacion MQTT
-8. Implementar agente del coche
-9. Integrar extremo a extremo
-10. Endurecer y preparar demo
+1. Cerrar topologia, IPs y estructura base
+2. Cerrar configuracion LTE (`EPC + eNodeB`)
+3. Cerrar provision del UE y politica de attach
+4. Confirmar conectividad IP del UE
+5. Montar `mosquitto + postgres + backend` en EPC
+6. Probar backend sin IA
+7. Montar servicio de inferencia en Jetson
+8. Conectar backend del EPC con Jetson
+9. Implementar decision y publicacion MQTT
+10. Implementar agente del coche
+11. Integrar extremo a extremo
+12. Endurecer supervision y seguridad funcional
+13. Alinear tiempos y correlacionar logs
+14. Dejar trazabilidad minima y preparar demo
 
 Si aparece un fallo en una fase, no avanzar a la siguiente hasta dejar cerrada la anterior.
 
 ---
 
 ## 6. Entregables tecnicos por fase
+
+### Fase 0
+
+- Topologia cerrada
+- Tabla de IPs y servicios
+- Estructura base del EPC preparada
 
 ### Fase 1
 
@@ -657,41 +744,53 @@ Si aparece un fallo en una fase, no avanzar a la siguiente hasta dejar cerrada l
 
 ### Fase 2
 
-- UE con IP y salida correcta
+- UE provisionado
+- Procedimiento de attach reproducible
 
 ### Fase 3
+
+- UE con IP y salida correcta
+
+### Fase 4
 
 - `docker-compose.yml`
 - backend minimo operativo
 - MQTT operativo
 - DB operativa
 
-### Fase 4
+### Fase 5
 
 - servicio `/infer` en Jetson
 
-### Fase 5
+### Fase 6
 
 - backend llamando a Jetson y guardando resultados
 
-### Fase 6
+### Fase 7
 
 - comando MQTT emitido automaticamente
 
-### Fase 7
+### Fase 8
 
 - coche recibiendo y ejecutando comandos
 
-### Fase 8
+### Fase 9
 
 - pipeline completo funcionando
 
-### Fase 9
-
-- fallbacks y seguridad operativa
-
 ### Fase 10
 
+- supervision de servicios
+- fallbacks y seguridad operativa
+
+### Fase 11
+
+- tiempos alineados
+- logs correlacionables
+
+### Fase 12
+
+- trazabilidad minima del flujo
 - procedimiento reproducible de demo
 
 ---
@@ -701,12 +800,14 @@ Si aparece un fallo en una fase, no avanzar a la siguiente hasta dejar cerrada l
 Se considera que el sistema esta listo cuando se cumplan estos puntos:
 
 - La red LTE arranca siempre sin reconfiguracion manual extra
+- Existe un procedimiento reproducible de alta y attach del UE
 - El coche se registra como UE y obtiene IP
 - El coche puede enviar frames al backend del EPC
 - El backend puede pedir inferencia a la Jetson
 - La Jetson devuelve predicciones validas
 - El backend genera y publica comandos
 - El coche ejecuta comandos usando los scripts existentes
+- Los servicios clave recuperan su estado de forma controlada
 - El sistema se para de forma segura cuando algo falla
-- Quedan registros de la actividad para demostrar el funcionamiento
-
+- Los eventos pueden correlacionarse temporalmente entre maquinas
+- Quedan registros y evidencias suficientes para demostrar el funcionamiento
