@@ -22,6 +22,13 @@ This is the dedicated link between `srsepc` and `srsenb`.
   - interface: `eno1`
   - the interface used for NAT and any upstream reachability
 
+## UE Routing Path
+
+- UE subnet: `172.16.0.0/24` on `srs_spgw_sgi`
+- Forwarding is enabled on EPC (`net.ipv4.ip_forward=1`)
+- UE egress to upstream uses NAT/MASQUERADE from `172.16.0.0/24` to `eno1`
+- EPC exposes DNS for UEs on `172.16.0.1:53` via `dnsmasq`
+
 ## UE Addressing
 
 - UE pool: `172.16.0.0/24`

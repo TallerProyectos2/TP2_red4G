@@ -109,6 +109,43 @@ The Phase 1 requirement is satisfied as long as at least one known-good UE remai
   - peer eNodeB name `srsenb01`
 - No EPC-side reconfiguration is required before the next manual start because the HSS database path is now absolute in `epc.conf`
 
+## Phase 2 UE Routing, NAT, And DNS Baseline
+
+- Validation date: `2026-03-05`
+- Jira scope: `TP2-143` (`EPC-Fase 2. Routing del UE, NAT y DNS`)
+- UE-side DNS advertised by EPC:
+  - `dns_addr = 172.16.0.1` in `/home/tp2/.config/srsran/epc.conf`
+- IPv4 forwarding:
+  - runtime: `net.ipv4.ip_forward = 1`
+  - persistent file: `/etc/sysctl.d/99-tp2-epc-routing.conf`
+- NAT and forward policy for UE network:
+  - persistent bootstrap script: `/usr/local/sbin/tp2-ue-routing.sh`
+  - startup unit: `tp2-ue-routing.service` (`enabled`, `active`)
+  - NAT rule: `-A POSTROUTING -s 172.16.0.0/24 -o eno1 -j MASQUERADE`
+  - FORWARD rules:
+    - `-A FORWARD -i srs_spgw_sgi -o eno1 -j ACCEPT`
+    - `-A FORWARD -i eno1 -o srs_spgw_sgi -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT`
+- DNS service:
+  - package: `dnsmasq`
+  - service: `dnsmasq` (`active`)
+  - config file: `/etc/dnsmasq.d/tp2-epc.conf`
+  - listen endpoint for UEs: `172.16.0.1:53`
+
+## Phase 2 Validation
+
+- After EPC restart, fresh S1 setup is confirmed in `/srv/tp2/logs/srsepc-console.log`:
+  - `Received S1 Setup Request`
+  - `Sending S1 Setup Response`
+- eNodeB side confirms SCTP S1 association in `ESTAB` state to `10.10.10.1:36412`
+- DNS resolution via UE-side endpoint succeeds:
+  - `dig @172.16.0.1 openai.com` returned valid A records
+- Source-address test from UE-side EPC address succeeds:
+  - `ping -I 172.16.0.1 1.1.1.1` with `0%` packet loss
+- NAT counters increment on the UE-source rule:
+  - `MASQUERADE ... -s 172.16.0.0/24 -o eno1` shows packet hits
+- Pending closure check:
+  - no new UE attach/data-plane evidence was observed in the short validation window after applying these changes
+
 ## Operational Note
 
 Phase 0 for the EPC is complete when these bindings and paths remain stable. Future phases can add services on top of this baseline, but they should not move these addresses or relocate the `/srv/tp2` working tree unless there is an incident with a documented rollback.

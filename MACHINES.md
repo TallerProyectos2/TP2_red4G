@@ -71,6 +71,10 @@ Do not store passwords here.
 - Connectivity:
   - attaches as an LTE UE
   - receives an address from the EPC
+  - observed IMSI during attach attempts: `901650000052126`
+  - UE pool on EPC: `172.16.0.0/24`
+  - static UE assignment configured on EPC (`2026-03-10`): `901650000052126 -> 172.16.0.2`
+  - latest observed UE IP in `srsepc` log (`2026-03-10`): `172.16.0.2`
 
 ## Ownership Rules
 
