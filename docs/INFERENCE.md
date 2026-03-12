@@ -50,6 +50,10 @@ Evidence reference: `docs/logs/validations/2026-03-05-epc-inferencia-local.md`.
 
 Jetson is pending and should be added as an inference-only node.
 
+Reference runbook:
+
+- `docs/JETSON.md`
+
 Requirements:
 
 - endpoint reachable from EPC

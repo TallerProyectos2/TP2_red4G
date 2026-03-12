@@ -1,0 +1,79 @@
+cat >/tmp/install_tailscale_jetson.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="1.94.2"
+ARCH="arm64"
+PKG="tailscale_${VERSION}_${ARCH}.tgz"
+URL="https://pkgs.tailscale.com/stable/${PKG}"
+SHA_URL="${URL}.sha256"
+
+echo "[1/8] Comprobando arquitectura..."
+uname -m
+if [[ "$(uname -m)" != "aarch64" ]]; then
+  echo "ERROR: este script es para Jetson ARM64/aarch64."
+  exit 1
+fi
+
+echo "[2/8] Preparando modulo tun..."
+sudo modprobe tun || true
+
+echo "[3/8] Descargando Tailscale ${VERSION}..."
+cd /tmp
+rm -rf "tailscale_${VERSION}_${ARCH}" "${PKG}" "${PKG}.sha256"
+curl -fsSLO "${URL}"
+curl -fsSLO "${SHA_URL}"
+
+echo "[4/8] Verificando checksum..."
+sha256sum -c "${PKG}.sha256"
+
+echo "[5/8] Extrayendo e instalando binarios..."
+tar xzf "${PKG}"
+cd "tailscale_${VERSION}_${ARCH}"
+sudo install -m 0755 tailscale /usr/local/bin/tailscale
+sudo install -m 0755 tailscaled /usr/local/bin/tailscaled
+
+echo "[6/8] Creando directorios de estado..."
+sudo install -d -m 0755 /var/lib/tailscale
+sudo install -d -m 0755 /run/tailscale
+
+echo "[7/8] Instalando servicio systemd..."
+sudo tee /etc/systemd/system/tailscaled.service >/dev/null <<'SERVICE'
+[Unit]
+Description=Tailscale node agent
+Documentation=https://tailscale.com/kb/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock
+ExecStop=/bin/sh -c '/usr/bin/pkill -x tailscaled || true'
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=tailscale
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+echo "[8/8] Arrancando tailscaled..."
+sudo systemctl daemon-reload
+sudo systemctl enable --now tailscaled
+sudo systemctl status tailscaled --no-pager
+
+echo
+echo "Instalacion completada."
+echo "Ahora conecta la Jetson a tu tailnet con UNO de estos comandos:"
+echo
+echo "  sudo tailscale up --ssh"
+echo
+echo "o, si tienes auth key:"
+echo
+echo "  sudo tailscale up --ssh --authkey tskey-XXXX"
+echo
+echo "Despues comprueba:"
+echo "  tailscale status"
+echo "  tailscale ip -4"
+EOF
+
+bash /tmp/install_tailscale_jetson.sh

@@ -51,12 +51,21 @@ Do not store passwords here.
 
 - Role:
   - inference-only node (pending integration)
+- Hostname:
+  - `grupo2tpii-desktop`
+- SSH user:
+  - `grupo2tpii`
 - Target use:
   - offload inference from EPC when required
   - keep control path anchored on EPC
+- Runbook:
+  - `docs/JETSON.md`
 - Addressing:
+  - management LAN IP: `192.168.72.127`
   - must be reachable from EPC
-  - document active IP in `docs/NETWORK.md`
+- Access path:
+  - direct SSH: `ssh grupo2tpii@192.168.72.127`
+  - local identity reference: `grupo2tpii@grupo2tpii-desktop`
 
 ## Coche
 
