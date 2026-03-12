@@ -38,13 +38,21 @@ If the board refuses to boot a JetPack 6.x SD image because it requires a QSPI/U
 
 ## Current Lab Identity
 
-- Hostname reference: `grupo2tpii-desktop`
-- SSH user: `grupo2tpii`
+- Hostname reference: `tp2-jetson`
+- Primary SSH user: `grupo4`
 - Current management IP: `192.168.72.127`
-- Direct SSH command:
+- Current Tailscale IP: `100.115.99.8`
+- Primary SSH command:
 
 ```bash
-ssh grupo2tpii@192.168.72.127
+ssh grupo4@tp2-jetson
+```
+
+- Alternate SSH commands:
+
+```bash
+ssh grupo4@100.115.99.8
+ssh grupo4@192.168.72.127
 ```
 
 ## Source References

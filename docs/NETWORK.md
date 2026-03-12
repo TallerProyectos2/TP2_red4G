@@ -39,7 +39,11 @@ This link carries S1 control and user-plane traffic between `srsepc` and `srsenb
 - Car should not call Jetson directly.
 - When Jetson inference is enabled, keep EPC local inference as fallback.
 - Current Jetson management IP: `192.168.72.127`
-- Current SSH path: `ssh grupo2tpii@192.168.72.127`
+- Current Jetson Tailscale IP: `100.115.99.8`
+- Current SSH path: `ssh grupo4@tp2-jetson`
+- Alternate SSH paths:
+  - `ssh grupo4@100.115.99.8`
+  - `ssh grupo4@192.168.72.127`
 
 ## Core Ports
 

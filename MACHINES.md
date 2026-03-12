@@ -52,9 +52,9 @@ Do not store passwords here.
 - Role:
   - inference-only node (pending integration)
 - Hostname:
-  - `grupo2tpii-desktop`
+  - `tp2-jetson`
 - SSH user:
-  - `grupo2tpii`
+  - `grupo4`
 - Target use:
   - offload inference from EPC when required
   - keep control path anchored on EPC
@@ -62,10 +62,12 @@ Do not store passwords here.
   - `docs/JETSON.md`
 - Addressing:
   - management LAN IP: `192.168.72.127`
+  - Tailscale IP: `100.115.99.8`
   - must be reachable from EPC
 - Access path:
-  - direct SSH: `ssh grupo2tpii@192.168.72.127`
-  - local identity reference: `grupo2tpii@grupo2tpii-desktop`
+  - primary SSH: `ssh grupo4@tp2-jetson`
+  - Tailscale direct SSH: `ssh grupo4@100.115.99.8`
+  - management LAN SSH: `ssh grupo4@192.168.72.127`
 
 ## Coche
 
