@@ -257,6 +257,23 @@ sudo ufw status verbose
 
 Do not open `9001/TCP` to `Anywhere` unless you have a very good reason.
 
+### Tailscale Without `apt`
+
+If Ubuntu package management is temporarily broken on the Jetson because of unrelated CUDA or NVIDIA dependencies, use the repository helper script that installs the official static ARM64 Tailscale binaries without touching `apt`:
+
+```bash
+cd ~/workspace/TP2_red4G
+bash scripts/install_tailscale_jetson.sh
+```
+
+Optional environment variables supported by the script:
+
+```bash
+TAILSCALE_VERSION=1.94.2
+TAILSCALE_HOSTNAME=tp2-jetson
+TAILSCALE_AUTHKEY=tskey-xxxx
+```
+
 ## 7. Optional Performance Preparation
 
 Before sustained inference sessions, inspect the available power profiles:
