@@ -18,6 +18,10 @@ Inference is currently available on EPC using scripts from `servicios/`.
 - `inferencia_gui_web.py`
   - batch web GUI for local/cloud inference
   - default bind: `0.0.0.0:7860` (or custom)
+- `coche.py`
+  - live car-control runtime on EPC
+  - manual keyboard/PS4 control remains on EPC
+  - can call a Roboflow-compatible endpoint for frame inference while the UDP control loop stays anchored on EPC
 
 ## Configuration Contract
 
@@ -60,6 +64,7 @@ Requirements:
 - compatible invocation semantics with current inference client behavior
 - switchable from EPC scripts by configuration
 - fallback to EPC local inference when Jetson path fails
+- car continues talking only to EPC, never directly to Jetson
 
 ## Non-Goals In Current Context
 

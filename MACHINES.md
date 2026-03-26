@@ -26,7 +26,7 @@ Do not store passwords here.
   - SGi (`srs_spgw_sgi`): `172.16.0.1/24`
 - Script runtime references:
   - repository path: `servicios/`
-  - deployed path used in validations: `/home/tp2/servicios_tp2/`
+  - deployed path used in recent validations: `/home/tp2/TP2_red4G/servicios/`
 - Access path:
   - primary remote entrypoint
   - SSH to EPC first

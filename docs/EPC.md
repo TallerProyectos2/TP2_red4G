@@ -55,12 +55,15 @@ Machine-specific source of truth for the EPC host under the current script-first
 
 ## Script Runtime Contract On EPC
 
-Operational scripts are stored in repo `servicios/` and validated on EPC under `/home/tp2/servicios_tp2/`.
+Operational scripts are stored in repo `servicios/` and validated on EPC under `/home/tp2/TP2_red4G/servicios/`.
 
 - Car control scripts:
   - `car1_cloud_control_server.py`
   - `car1_cloud_control_server_real_time_control.py`
   - `car1_manual_control_server.py`
+  - `prueba.py` (car1 manual control on `172.16.0.1:20001`)
+  - `coche.py` (car1 manual control on `172.16.0.1:20001`, keyboard + PS4, optional Roboflow inference overlay)
+  - `prueba_ps4.py` (compatibility wrapper to `coche.py`)
   - `car3_cloud_control_server.py`
   - `car3_cloud_control_server_real_time_control.py`
   - `car3_manual_control_server.py`
@@ -70,6 +73,7 @@ Operational scripts are stored in repo `servicios/` and validated on EPC under `
   - `inferencia.py` (CLI execution and annotated output)
   - `inferencia_gui_web.py` (web UI, default `0.0.0.0:7860`)
   - `inferencia_gui.py` (desktop GUI; requires `tkinter`)
+  - `roboflow_runtime.py` (shared Roboflow client/helpers for CLI, GUI, and live car control)
 
 ## Service Port Contract (Current)
 
