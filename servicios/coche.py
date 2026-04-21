@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import cmath
-import math
 import os
 import pickle
 from pathlib import Path
@@ -11,8 +9,44 @@ import tempfile
 import threading
 import time
 
+
+def load_machine_env_file():
+    env_file_candidates = [
+        os.getenv("TP2_COCHE_ENV_FILE", "").strip(),
+        "~/.config/tp2/coche-jetson.env",
+        "/etc/tp2/coche-jetson.env",
+    ]
+
+    for candidate in env_file_candidates:
+        if not candidate:
+            continue
+
+        env_path = Path(candidate).expanduser()
+        if not env_path.exists():
+            continue
+
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key:
+                os.environ.setdefault(key, value)
+        return env_path
+
+    return None
+
+
+load_machine_env_file()
+
 import cv2
-import numpy as np
 
 try:
     from pynput import keyboard as pynput_keyboard
@@ -28,6 +62,14 @@ except ImportError:
     InputDevice = None
     ecodes = None
     list_devices = None
+
+# The live car script runs on EPC, but its default inference backend is Jetson.
+# Keep these as defaults only so operators can still override them from env.
+os.environ.setdefault("TP2_INFERENCE_MODE", "local")
+os.environ.setdefault("TP2_INFERENCE_TARGET", "workflow")
+os.environ.setdefault("ROBOFLOW_LOCAL_API_URL", "http://100.115.99.8:9001")
+os.environ.setdefault("ROBOFLOW_WORKSPACE", "1-v8mk1")
+os.environ.setdefault("ROBOFLOW_WORKFLOW", "custom-workflow-2")
 
 from roboflow_runtime import (
     InferenceConfig,
@@ -431,26 +473,6 @@ def watch_ps4_controller():
         time.sleep(PS4_SCAN_INTERVAL_SEC)
 
 
-def draw_lidar_map(ranges):
-    img_lidar = np.zeros((480, 640, 3), np.uint8)
-    angle_index = 0
-    for range_value in ranges:
-        z_value = cmath.rect(range_value, math.radians(-angle_index - 90))
-        angle_index = angle_index + 1
-        if z_value.real != float("inf") and z_value.real != float("-inf"):
-            x = int(z_value.real * 70) + 320
-        else:
-            x = 0
-        if z_value.imag != float("inf") and z_value.imag != float("-inf"):
-            y = int(z_value.imag * 70) + 240
-        else:
-            y = 0
-        cv2.circle(img_lidar, (x, y), radius=2, color=(0, 0, 255), thickness=2)
-
-    cv2.imshow("Mapa LIDAR", img_lidar)
-    cv2.waitKey(1)
-
-
 def main():
     global sock
 
@@ -506,8 +528,6 @@ def main():
             send_control(current_steering, current_accelerator, address)
         if data_type == b"D":
             pass
-        if data_type == b"L":
-            draw_lidar_map(data)
 
 
 if __name__ == "__main__":

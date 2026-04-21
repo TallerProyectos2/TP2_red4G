@@ -15,6 +15,45 @@ except ImportError:
     InferenceHTTPClient = None
 
 
+def load_machine_env_file() -> Path | None:
+    env_file_candidates = [
+        os.getenv("TP2_INFERENCE_ENV_FILE", "").strip(),
+        os.getenv("TP2_COCHE_ENV_FILE", "").strip(),
+        "~/.config/tp2/inference.env",
+        "~/.config/tp2/coche-jetson.env",
+        "/etc/tp2/inference.env",
+        "/etc/tp2/coche-jetson.env",
+    ]
+
+    for candidate in env_file_candidates:
+        if not candidate:
+            continue
+
+        env_path = Path(candidate).expanduser()
+        if not env_path.exists():
+            continue
+
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key:
+                os.environ.setdefault(key, value)
+        return env_path
+
+    return None
+
+
+load_machine_env_file()
+
 DEFAULT_MODE = os.getenv("TP2_INFERENCE_MODE", "local").strip().lower()
 DEFAULT_TARGET = os.getenv("TP2_INFERENCE_TARGET", "").strip().lower()
 DEFAULT_LOCAL_API_URL = os.getenv("ROBOFLOW_LOCAL_API_URL", "http://127.0.0.1:9001").strip()
