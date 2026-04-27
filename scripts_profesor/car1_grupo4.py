@@ -1,6 +1,11 @@
 import socket
 import struct
 import pickle
+import os
+
+if not os.environ.get("DISPLAY"):
+    os.environ["DISPLAY"] = ":1"
+
 import cv2
 #import artemis_autonomous_car
 import time
