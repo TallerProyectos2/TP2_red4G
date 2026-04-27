@@ -427,23 +427,44 @@ def decode_pickle_payload(payload: bytes) -> Any:
     return pickle.loads(payload, encoding="latin1")
 
 
+def normalize_decoded_frame(frame: np.ndarray | None) -> np.ndarray | None:
+    if frame is None:
+        return None
+    if frame.dtype != np.uint8:
+        frame = frame.astype(np.uint8)
+    if frame.ndim == 2:
+        return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    if frame.ndim == 3 and frame.shape[2] == 3:
+        return frame.copy()
+    return None
+
+
+def decode_compressed_image(data: np.ndarray) -> np.ndarray | None:
+    if data.size == 0:
+        return None
+    if data.dtype != np.uint8:
+        data = data.astype(np.uint8)
+    compressed = np.ascontiguousarray(data.reshape(-1))
+    return normalize_decoded_frame(cv2.imdecode(compressed, cv2.IMREAD_COLOR))
+
+
 def decode_image_payload(value: Any) -> np.ndarray | None:
     if isinstance(value, np.ndarray):
-        if value.dtype != np.uint8:
-            value = value.astype(np.uint8)
-        if value.ndim == 1:
-            return cv2.imdecode(value, cv2.IMREAD_COLOR)
-        if value.ndim in {2, 3}:
-            return value.copy()
+        frame = decode_compressed_image(value)
+        if frame is not None:
+            return frame
+        return normalize_decoded_frame(value)
     if isinstance(value, (bytes, bytearray, memoryview)):
         data = np.frombuffer(bytes(value), dtype=np.uint8)
-        return cv2.imdecode(data, cv2.IMREAD_COLOR)
+        return decode_compressed_image(data)
     if isinstance(value, (list, tuple)):
         data = np.asarray(value, dtype=np.uint8)
-        if data.ndim == 1:
-            return cv2.imdecode(data, cv2.IMREAD_COLOR)
-        if data.ndim in {2, 3}:
-            return data.copy()
+        frame = decode_compressed_image(data)
+        if frame is not None:
+            return frame
+        return normalize_decoded_frame(data)
     if isinstance(value, dict):
         for key in ("image", "frame", "jpg", "jpeg", "data"):
             if key in value:
