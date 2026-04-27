@@ -25,7 +25,8 @@ This link carries S1 control and user-plane traffic between `srsepc` and `srsenb
 ## UE Addressing
 
 - Car IMSI: `901650000052126`
-- Current fixed assignment: `172.16.0.2`
+- Previous fixed assignment target: `172.16.0.2`
+- Live note (`2026-04-27`): EPC HSS currently has `IP_alloc=dynamic`; latest observed UE IP was `172.16.0.4`.
 
 ## Current Runtime Reachability
 
@@ -62,7 +63,7 @@ This link carries S1 control and user-plane traffic between `srsepc` and `srsenb
 
 - EPC can ping eNodeB
 - eNodeB has S1 association to EPC
-- Car UE is attached with `172.16.0.2`
+- Car UE is attached; verify the current IP from the latest `srsepc` log for IMSI `901650000052126`
 - EPC control script receives UDP payloads from car
 - EPC sends UDP control back to car
 - If local inference is enabled, `127.0.0.1:9001` responds

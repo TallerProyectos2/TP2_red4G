@@ -20,7 +20,7 @@ The manual order below remains the operational source for troubleshooting.
 4. Start `srsepc` on EPC.
 5. Start `srsenb` on eNodeB.
 6. Verify S1 setup is established.
-7. Verify car UE attach and IP assignment (`172.16.0.2` expected) when troubleshooting. The automated `tp2-up` path does not block on this check by default.
+7. Verify car UE attach and current IP assignment from the latest `srsepc` log entry for IMSI `901650000052126`. The old fixed target was `172.16.0.2`, but the live HSS was observed with dynamic allocation on `2026-04-27`. The automated `tp2-up` path does not block on this check by default.
 8. Start required services on EPC:
    - `mosquitto`
    - `tp2-car-control.service` (`servicios/coche.py`)
@@ -53,7 +53,7 @@ The manual order below remains the operational source for troubleshooting.
 
 - Selected control script binds its UDP port.
 - `coche.py` exposes the live operator web view on `8088/TCP` when used as the control runtime.
-- `coche.py` accepts remote manual control over the web view and falls back to neutral when web commands stop.
+- `coche.py` accepts direct remote manual control over the web view and falls back to neutral when web commands stop.
 - Script receives car payloads (`I`, `B`, `D`).
 - Script sends control packets (`C`) back to car.
 - Car behavior matches command stream.

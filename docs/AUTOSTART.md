@@ -46,7 +46,7 @@ Run the orchestration commands from the EPC repository checkout:
 - Jetson SSH: optional. Leave `TP2_JETSON_SSH` empty when the EPC can reach the HTTP endpoint but Tailscale policy does not allow SSH.
 - Default startup profile: `jetson`, so `ops/bin/tp2-up` and `ops/bin/tp2-up --profile jetson` are equivalent unless `TP2_DEFAULT_PROFILE` is overridden.
 - Live video web view: `http://100.97.19.112:8088/` from Tailscale, or `http://172.16.0.1:8088/` from the UE side when reachable.
-- Car UE gating: disabled by default. `tp2-up` checks `172.16.0.2` once and continues if not confirmed. Set `TP2_REQUIRE_CAR_UE=1` to restore the old blocking wait.
+- Car UE gating: disabled by default. `tp2-up` checks the car UE best-effort and continues if not confirmed. Set `TP2_REQUIRE_CAR_UE=1` to restore the old blocking wait.
 
 If you intentionally run from an operator laptop instead, create a local override file that sets:
 
@@ -57,7 +57,7 @@ TP2_ENB_SSH_PROXY=tp2@100.97.19.112
 ```
 
 The car runtime is intentionally outside this automation. Operators start and stop the car-side process manually.
-The EPC automation no longer blocks on UE IP detection by default because the modem attach state can be valid even when `172.16.0.2` does not answer ping or the attach log is not fresh.
+The EPC automation no longer blocks on UE IP detection by default because the modem attach state can be valid even when the previous fixed target `172.16.0.2` does not answer ping or the attach log is not fresh. The live HSS was observed with dynamic UE allocation on `2026-04-27`, so confirm the current IP from the latest `srsepc` log when troubleshooting.
 
 ## Startup Order
 
@@ -69,7 +69,7 @@ The EPC automation no longer blocks on UE IP detection by default because the mo
 4. On EPC, start `tp2-srsepc.service`.
 5. Wait for EPC S1/GTP sockets and `srsepc`.
 6. On eNodeB, start `tp2-srsenb.service`.
-7. Check the car UE path once: ping `172.16.0.2` or a recent EPC attach log for that UE IP. Continue when not confirmed unless `TP2_REQUIRE_CAR_UE=1`.
+7. Check the car UE path once: ping the configured `TP2_CAR_UE_IP` or inspect the latest EPC attach log for IMSI `901650000052126`. Continue when not confirmed unless `TP2_REQUIRE_CAR_UE=1`.
 8. Check the Jetson inference endpoint from EPC. If `TP2_JETSON_SSH` and `TP2_START_JETSON_INFERENCE=1` are configured, start `tp2-roboflow-inference.service` first.
 9. On EPC, start `tp2-local-inference.service` when local fallback is enabled.
 10. On EPC, start `mosquitto.service`.
@@ -141,7 +141,7 @@ ops/bin/tp2-status
 - status endpoint: `http://127.0.0.1:8088/status.json` on EPC
 - operator URL over Tailscale: `http://100.97.19.112:8088/`
 - camera stream: `/video.mjpg`
-- control API: `POST /control` and `POST /control/neutral`
+- control API: `POST /control` applies browser commands directly; `POST /control/neutral` remains available for internal safe-stop calls
 - safety timeout: `TP2_WEB_CONTROL_TIMEOUT_SEC` forces neutral when browser commands stop
 - command stream: `TP2_CONTROL_TX_HZ` sends the latest steering/throttle to the last car UDP endpoint while it is fresh
 

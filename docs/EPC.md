@@ -36,10 +36,11 @@ Machine-specific source of truth for the EPC host under the current script-first
 ## UE Provisioning Contract
 
 - UE pool network: `172.16.0.0/24`
-- Current fixed car mapping:
+- Previous fixed car mapping target:
   - IMSI `901650000052126` -> `172.16.0.2`
-- Last observed assignment in `srsepc` log:
-  - `IMSI: 901650000052126, UE IP: 172.16.0.2`
+- Live assignment note (`2026-04-27`):
+  - `/home/tp2/.config/srsran/user_db.csv` currently shows `IP_alloc=dynamic`
+  - latest observed assignment in `srsepc` log: `IMSI: 901650000052126, UE IP: 172.16.0.4`
 
 ## Routing And DNS Contract
 

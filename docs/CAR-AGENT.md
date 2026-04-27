@@ -32,15 +32,17 @@ Normal sessions use one EPC runtime from `servicios/`:
 ## Runtime Modes
 
 - Web manual mode:
-  - browser-driven steering/throttle through `coche.py` on EPC
+  - direct browser-driven steering/throttle through `coche.py` on EPC
   - camera display for operator feedback
   - optional Roboflow inference overlay on live camera frames
 
 ## LTE Binding Context
 
 - Car attaches as UE in EPC network.
-- Current static mapping:
+- Previous static mapping target:
   - IMSI `901650000052126` -> `172.16.0.2`
+- Live note (`2026-04-27`):
+  - EPC HSS currently has `IP_alloc=dynamic`; latest observed UE IP was `172.16.0.4`
 
 ## Minimum Validation
 
@@ -54,7 +56,8 @@ Normal sessions use one EPC runtime from `servicios/`:
 - Current LTE-side runtime bind is `172.16.0.1:20001`.
 - `coche.py` is the only normal car runtime in `servicios/`.
 - `coche.py` exposes the live camera/inference/operator status and remote manual control web view on `8088/TCP`; use `http://100.97.19.112:8088/` from Tailscale during normal EPC-run sessions.
-- Browser control has a watchdog: if the web UI stops sending commands, EPC returns to neutral instead of holding the last throttle.
+- Browser control is direct once the operator opens the web UI. It has a watchdog: if the web UI stops sending commands, EPC returns to neutral instead of holding the last throttle.
+- `scripts_profesor/car1_grupo4.py` is a professor-style manual-control server adapted for Grupo 4. It intentionally keeps the professor script behavior and binds the LTE runtime address `172.16.0.1:20001`, so do not run it at the same time as `tp2-car-control.service`.
 - `coche.py` defaults its live inference endpoint to Jetson at `http://100.115.99.8:9001` using direct model inference (`TP2_INFERENCE_TARGET=model`, `ROBOFLOW_MODEL_ID=tp2-g4-2026/2`); override these variables only when intentionally using another backend.
 - `coche.py` loads `/home/tp2/.config/tp2/inference.env` or `/home/tp2/.config/tp2/coche-jetson.env` automatically, so operators do not need to `source` the token manually.
 - On the EPC, `conda activate tp2` also loads the same runtime variables and token through the Conda activation hook.

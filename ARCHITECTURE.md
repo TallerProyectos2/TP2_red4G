@@ -11,7 +11,7 @@ TP2 runs as a four-machine lab, but the current critical path is script-based an
 
 ## Current Critical Path
 
-1. Car attaches to LTE and gets UE IP from EPC (`172.16.0.2`).
+1. Car attaches to LTE and gets UE IP from EPC. The previous fixed target was `172.16.0.2`; the live EPC HSS was observed on `2026-04-27` with dynamic allocation and the active session at `172.16.0.4`.
 2. Car sends UDP payloads (image/battery/runtime) to EPC control server.
 3. EPC script computes steering/throttle.
 4. EPC sends UDP control packet back to car.
@@ -62,7 +62,8 @@ This path works without introducing a new backend API layer.
 
 - EPC SGi: `172.16.0.1/24`
 - Car UE subnet: `172.16.0.0/24`
-- Current fixed car mapping: `901650000052126 -> 172.16.0.2`
+- Previous fixed car mapping target: `901650000052126 -> 172.16.0.2`
+- Live note (`2026-04-27`): EPC HSS currently has `IP_alloc=dynamic` for the car IMSI, so the active UE IP can change.
 
 ## Protocol Contract (Current)
 

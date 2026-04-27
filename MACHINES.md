@@ -102,13 +102,14 @@ Do not store passwords here.
   - attaches as LTE UE
   - receives address from EPC UE pool `172.16.0.0/24`
   - observed IMSI: `901650000052126`
-  - static UE assignment on EPC: `901650000052126 -> 172.16.0.2`
+  - previous static UE target: `901650000052126 -> 172.16.0.2`
+  - live note (`2026-04-27`): EPC HSS currently has `IP_alloc=dynamic`; latest observed UE IP was `172.16.0.4`
 - Control transport:
   - UDP payload stream to EPC control scripts
   - UDP control packets returned by EPC
 - Autostart note:
   - car-side runtime is started manually by operators
-  - EPC automation checks UE IP `172.16.0.2` best-effort before publishing the `AM-Cloud` state, but does not block by default
+  - EPC automation checks the car UE best-effort before publishing the `AM-Cloud` state, but does not block by default
 
 ## Ownership Rules
 

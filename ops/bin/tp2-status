@@ -25,8 +25,15 @@ printf 'mosquitto: '; systemctl is-active ${TP2_EPC_MQTT_SERVICE} 2>/dev/null ||
 printf 'local inference: '; systemctl is-active ${TP2_EPC_LOCAL_INFERENCE_SERVICE} 2>/dev/null || true
 printf 'car control: '; systemctl is-active ${TP2_EPC_CAR_CONTROL_SERVICE} 2>/dev/null || true
 printf 'S1 association: '; if ss -H -nA sctp | grep ESTAB | grep -F ':36412' | grep -F '${TP2_ENB_BACKHAUL_IP}:' >/dev/null; then echo established; else echo missing; fi
-if ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1 || grep -q 'UE IP: ${TP2_CAR_UE_IP}' /srv/tp2/logs/srsepc.log; then
-  echo 'car UE: ok (${TP2_CAR_UE_IP})'
+latest_car_ue_ip=\$(grep -F 'IMSI: ${TP2_CAR_IMSI}, UE IP:' /srv/tp2/logs/srsepc.log 2>/dev/null | tail -n 1 | sed -E 's/.*UE IP: ([0-9.]+).*/\1/')
+if [ -n "\${latest_car_ue_ip}" ]; then
+  if [ "\${latest_car_ue_ip}" = "${TP2_CAR_UE_IP}" ]; then
+    echo 'car UE: ok ('"\${latest_car_ue_ip}"')'
+  else
+    echo 'car UE: latest '"\${latest_car_ue_ip}"' (configured ${TP2_CAR_UE_IP})'
+  fi
+elif ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1; then
+  echo 'car UE: ping ok (${TP2_CAR_UE_IP})'
 else
   echo 'car UE: not confirmed'
 fi

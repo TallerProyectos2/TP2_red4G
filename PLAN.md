@@ -17,7 +17,8 @@ Este plan toma como base un runtime unico en `servicios/coche.py` y elimina comp
 - LTE:
   - EPC y eNodeB enlazan por `10.10.10.0/24`.
   - El coche adjunta como UE.
-  - UE del coche fijado en EPC: `901650000052126 -> 172.16.0.2`.
+  - Estado documentado anterior: UE del coche fijado en EPC como `901650000052126 -> 172.16.0.2`.
+  - Estado vivo observado el `2026-04-27`: HSS tiene `IP_alloc=dynamic` para `901650000052126` y la sesion activa uso `172.16.0.4`.
 - Inferencia:
   - Modelo y flujo de inferencia disponibles en Jetson por HTTP Roboflow.
   - Evidencia en `docs/logs/validations/2026-03-05-epc-inferencia-local.md`.
@@ -84,7 +85,7 @@ Eso puede existir en el futuro como capa adicional, pero no es requisito para se
 - Mantener:
   - `srsepc` estable
   - `srsenb` estable
-  - mapeo UE fijo `172.16.0.2`
+  - mapeo UE estable; si se requiere IP fija, restaurar `IP_alloc=172.16.0.2` en una ventana controlada y validar reattach
 
 ## Paso 1. Estandarizar ejecucion de scripts en EPC (completado)
 
@@ -98,14 +99,14 @@ Eso puede existir en el futuro como capa adicional, pero no es requisito para se
 - IP/puerto de escucha UDP: `172.16.0.1:20001`.
 - Formato de datos esperados: `I`, `B`, `D` con payload `pickle`.
 - Formato de control de salida: `C` con `double` giro y `double` acelerador.
-- Control manual remoto desde navegador con watchdog a neutro.
+- Control manual remoto directo desde navegador con watchdog a neutro.
 
 ## Paso 3. Validacion repetible extremo a extremo sobre EPC (pendiente corta)
 
 - Prueba minima:
   - arrancar `srsepc`
   - arrancar `srsenb`
-  - confirmar UE `172.16.0.2`
+  - confirmar UE del coche por el ultimo attach del IMSI `901650000052126`
 - arrancar `tp2-car-control.service` en EPC
   - verificar ida y vuelta UDP con el coche
 - Prueba de inferencia:
@@ -146,7 +147,7 @@ Eso puede existir en el futuro como capa adicional, pero no es requisito para se
 ## LTE y red
 
 - S1 estable entre EPC y eNodeB.
-- UE del coche con IP fija `172.16.0.2`.
+- UE del coche adjunta; si se requiere IP fija, HSS debe tener `IP_alloc=172.16.0.2` y la sesion debe validarlo.
 
 ## Control por scripts
 

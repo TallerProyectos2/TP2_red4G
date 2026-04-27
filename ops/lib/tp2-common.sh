@@ -40,6 +40,7 @@ tp2_load_config() {
   : "${TP2_EPC_BACKHAUL_IP:=10.10.10.1}"
   : "${TP2_ENB_BACKHAUL_IP:=10.10.10.2}"
   : "${TP2_EPC_SGI_IP:=172.16.0.1}"
+  : "${TP2_CAR_IMSI:=901650000052126}"
   : "${TP2_CAR_UE_IP:=172.16.0.2}"
   : "${TP2_JETSON_INFERENCE_URL:=http://100.115.99.8:9001}"
   : "${TP2_ROBOFLOW_MODEL_ID:=tp2-g4-2026/2}"
@@ -309,13 +310,13 @@ tp2_wait_s1() {
 tp2_wait_car_ue() {
   local timeout_sec="${1:-${TP2_WAIT_UE_TIMEOUT_SEC}}"
 
-  tp2_wait_remote "${TP2_EPC_SSH}" "${timeout_sec}" "car UE ${TP2_CAR_UE_IP} reachable or recently attached" \
-    "ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1 || grep -q 'UE IP: ${TP2_CAR_UE_IP}' /srv/tp2/logs/srsepc.log"
+  tp2_wait_remote "${TP2_EPC_SSH}" "${timeout_sec}" "car UE ${TP2_CAR_IMSI} reachable or recently attached" \
+    "latest_ip=\$(grep -F 'IMSI: ${TP2_CAR_IMSI}, UE IP:' /srv/tp2/logs/srsepc.log 2>/dev/null | tail -n 1 | sed -E 's/.*UE IP: ([0-9.]+).*/\\1/'); test -n \"\${latest_ip}\" || ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1"
 }
 
 tp2_check_car_ue_once() {
   tp2_remote_sh "${TP2_EPC_SSH}" \
-    "ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1 || grep -q 'UE IP: ${TP2_CAR_UE_IP}' /srv/tp2/logs/srsepc.log" \
+    "latest_ip=\$(grep -F 'IMSI: ${TP2_CAR_IMSI}, UE IP:' /srv/tp2/logs/srsepc.log 2>/dev/null | tail -n 1 | sed -E 's/.*UE IP: ([0-9.]+).*/\\1/'); test -n \"\${latest_ip}\" || ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1" \
     >/dev/null 2>&1
 }
 
