@@ -142,6 +142,7 @@ ops/bin/tp2-status
 - operator URL over Tailscale: `http://100.97.19.112:8088/`
 - camera stream: `/video.mjpg`
 - control API: `POST /control` applies browser commands directly; `POST /control/neutral` remains available for internal safe-stop calls
+- mode API: `POST /mode` switches between `manual` and `autonomous`; manual remains the safe startup mode
 - safety timeout: `TP2_WEB_CONTROL_TIMEOUT_SEC` forces neutral when browser commands stop
 - command stream: `TP2_CONTROL_TX_HZ` sends the latest steering/throttle to the last car UDP endpoint while it is fresh
 

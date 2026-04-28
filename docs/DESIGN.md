@@ -46,8 +46,10 @@ This avoids destabilizing the validated EPC+eNodeB+car path.
 - Car control:
   - UDP payload stream to EPC scripts
   - UDP control response from EPC to car
+  - mode selection stays in EPC web runtime; manual browser commands and autonomous decisions both produce the same `C + steering + throttle` packet
 - Inference:
   - local endpoint on EPC (or cloud target when configured)
+  - detections feed the EPC autonomous policy; Jetson remains an inference endpoint only
 
 ## Design Invariants
 

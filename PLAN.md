@@ -41,7 +41,8 @@ Este plan toma como base un runtime unico en `servicios/coche.py` y elimina comp
 2. Coche envia `I`, `B` y `D` por UDP a `servicios/coche.py` en el EPC.
 3. EPC decodifica el ultimo frame y lo publica como MJPEG en `8088/TCP`.
 4. EPC envia los frames mas recientes a Jetson para inferencia asincrona y pinta bounding boxes/labels sobre el stream.
-5. El navegador actualiza giro/gas por HTTP; EPC aplica watchdog y envia `C + steering + throttle` por UDP al coche.
+5. El navegador permite alternar modo manual/autonomo por HTTP; EPC aplica watchdog en manual o calcula control autonomo desde detecciones frescas.
+6. EPC envia `C + steering + throttle` por UDP al coche.
 
 ## 3.2 Inferencia actual
 
@@ -63,7 +64,8 @@ Este plan toma como base un runtime unico en `servicios/coche.py` y elimina comp
 ## 4.1 Ya cubierto
 
 - Runtime web del coche:
-  - `coche.py` (UDP del coche, MJPEG, inferencia asincrona, control web y watchdog)
+  - `coche.py` (UDP del coche, MJPEG, inferencia asincrona, control web, modo autonomo y watchdog manual)
+  - `autonomous_driver.py` (politica determinista para señales del modelo: seguir, girar, parar y limitar velocidad)
 - Inferencia y validacion:
   - `inferencia.py` (CLI)
   - `start_local_inference_server.py` (endpoint local)
@@ -100,6 +102,10 @@ Eso puede existir en el futuro como capa adicional, pero no es requisito para se
 - Formato de datos esperados: `I`, `B`, `D` con payload `pickle`.
 - Formato de control de salida: `C` con `double` giro y `double` acelerador.
 - Control manual remoto directo desde navegador con watchdog a neutro.
+- Selector web manual/autonomo:
+  - manual: navegador publica giro/gas y watchdog vuelve a neutro si deja de publicar.
+  - autonomo: EPC decide desde detecciones Roboflow recientes, priorizando señales mas cercanas por area de bounding box y modulando la accion por zona izquierda/centro/derecha.
+  - fallback: sin frame o inferencia fresca, EPC manda neutro.
 
 ## Paso 3. Validacion repetible extremo a extremo sobre EPC (pendiente corta)
 

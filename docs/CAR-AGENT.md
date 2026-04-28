@@ -35,6 +35,11 @@ Normal sessions use one EPC runtime from `servicios/`:
   - direct browser-driven steering/throttle through `coche.py` on EPC
   - camera display for operator feedback
   - optional Roboflow inference overlay on live camera frames
+- Web autonomous mode:
+  - operator toggles manual/autonomous from the same web UI
+  - EPC uses fresh Roboflow detections to choose continue, turn, stop, crawl, slow, or faster cruise
+  - nearest/relevant signs are selected by bounding-box area, confidence, and image zone (`left`, `center`, `right`)
+  - stale frame or stale inference state forces neutral instead of continuing on old detections
 
 ## LTE Binding Context
 
@@ -57,6 +62,7 @@ Normal sessions use one EPC runtime from `servicios/`:
 - `coche.py` is the only normal car runtime in `servicios/`.
 - `coche.py` exposes the live camera/inference/operator status and remote manual control web view on `8088/TCP`; use `http://100.97.19.112:8088/` from Tailscale during normal EPC-run sessions.
 - Browser control is direct once the operator opens the web UI. It has a watchdog: if the web UI stops sending commands, EPC returns to neutral instead of holding the last throttle.
+- The web UI exposes `POST /mode` for `manual` and `autonomous`. Manual is the safe default; autonomous should only be enabled after live camera frames and inference are visible.
 - `scripts_profesor/car1_grupo4.py` is a professor-style manual-control server adapted for Grupo 4. It intentionally keeps the professor script behavior and binds the LTE runtime address `172.16.0.1:20001`, so do not run it at the same time as `tp2-car-control.service`.
 - `coche.py` defaults its live inference endpoint to Jetson at `http://100.115.99.8:9001` using direct model inference (`TP2_INFERENCE_TARGET=model`, `ROBOFLOW_MODEL_ID=tp2-g4-2026/2`); override these variables only when intentionally using another backend.
 - `coche.py` loads `/home/tp2/.config/tp2/inference.env` or `/home/tp2/.config/tp2/coche-jetson.env` automatically, so operators do not need to `source` the token manually.

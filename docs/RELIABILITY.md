@@ -25,6 +25,9 @@
 - If local inference endpoint fails:
   - hold or reduce control aggressiveness and avoid stale command loops.
 
+- If autonomous mode loses fresh frames or inference:
+  - return steering/throttle to neutral and surface `autonomous-safe` in web status.
+
 - If UDP control loop breaks:
   - car must fall back to safe stop behavior.
 

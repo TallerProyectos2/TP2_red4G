@@ -19,6 +19,7 @@ Do not store passwords here.
   - optional `dnsmasq`
   - control scripts from `servicios/`
   - local inference endpoint from `servicios/`
+  - autonomous driving policy from `servicios/autonomous_driver.py`
 - Known addresses:
   - upstream (`eno1`): `10.0.128.174/24` (DHCP)
   - backhaul (`enp1s0`): `10.10.10.1/24`
@@ -107,6 +108,7 @@ Do not store passwords here.
 - Control transport:
   - UDP payload stream to EPC control scripts
   - UDP control packets returned by EPC
+  - autonomous decisions are computed on EPC; the car only executes received steering/throttle commands
 - Autostart note:
   - car-side runtime is started manually by operators
   - EPC automation checks the car UE best-effort before publishing the `AM-Cloud` state, but does not block by default

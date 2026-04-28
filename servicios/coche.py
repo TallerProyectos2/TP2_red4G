@@ -25,6 +25,11 @@ os.environ.setdefault("TP2_INFERENCE_TARGET", "model")
 os.environ.setdefault("ROBOFLOW_LOCAL_API_URL", "http://100.115.99.8:9001")
 os.environ.setdefault("ROBOFLOW_MODEL_ID", "tp2-g4-2026/2")
 
+from autonomous_driver import (  # noqa: E402
+    AutonomousConfig,
+    AutonomousDecision,
+    decide_autonomous_control,
+)
 from roboflow_runtime import (  # noqa: E402
     InferenceConfig,
     create_client,
@@ -83,6 +88,29 @@ INFERENCE_RETRY_SEC = env_float("TP2_INFERENCE_RETRY_SEC", 2.0)
 INFERENCE_MIN_CONFIDENCE = env_float("TP2_INFERENCE_MIN_CONFIDENCE", 0.20)
 OVERLAY_MAX_AGE_SEC = env_float("TP2_OVERLAY_MAX_AGE_SEC", 1.25)
 JPEG_QUALITY = min(95, max(35, env_int("TP2_JPEG_QUALITY", 78)))
+
+DEFAULT_DRIVE_MODE = os.getenv("TP2_DEFAULT_DRIVE_MODE", "manual").strip().lower()
+AUTONOMOUS_CONFIG = AutonomousConfig(
+    min_confidence=max(
+        INFERENCE_MIN_CONFIDENCE,
+        env_float("TP2_AUTONOMOUS_MIN_CONFIDENCE", 0.35),
+    ),
+    stale_prediction_sec=env_float("TP2_AUTONOMOUS_STALE_SEC", 1.25),
+    max_frame_age_sec=env_float("TP2_AUTONOMOUS_MAX_FRAME_AGE_SEC", 1.0),
+    min_area_ratio=env_float("TP2_AUTONOMOUS_MIN_AREA_RATIO", 0.004),
+    near_area_ratio=env_float("TP2_AUTONOMOUS_NEAR_AREA_RATIO", 0.045),
+    center_left=env_float("TP2_AUTONOMOUS_CENTER_LEFT", 0.40),
+    center_right=env_float("TP2_AUTONOMOUS_CENTER_RIGHT", 0.60),
+    neutral_steering=NEUTRAL_STEERING,
+    neutral_throttle=NEUTRAL_THROTTLE,
+    crawl_throttle=env_float("TP2_AUTONOMOUS_CRAWL_THROTTLE", 0.12),
+    slow_throttle=env_float("TP2_AUTONOMOUS_SLOW_THROTTLE", 0.18),
+    turn_throttle=env_float("TP2_AUTONOMOUS_TURN_THROTTLE", 0.22),
+    cruise_throttle=env_float("TP2_AUTONOMOUS_CRUISE_THROTTLE", 0.34),
+    fast_throttle=env_float("TP2_AUTONOMOUS_FAST_THROTTLE", 0.48),
+    left_steering=env_float("TP2_AUTONOMOUS_LEFT_STEERING", 0.84),
+    right_steering=env_float("TP2_AUTONOMOUS_RIGHT_STEERING", -0.84),
+)
 
 EXIT_EVENT = threading.Event()
 
@@ -151,6 +179,18 @@ class RuntimeState:
         self.throttle = NEUTRAL_THROTTLE
         self.control_updated_at = wall_time()
         self.control_seq = 0
+        self.drive_mode = normalize_drive_mode(DEFAULT_DRIVE_MODE)
+        self.autonomous_decision = AutonomousDecision(
+            active=False,
+            steering=NEUTRAL_STEERING,
+            throttle=NEUTRAL_THROTTLE,
+            action="safe-neutral",
+            reason="not-evaluated",
+            target=None,
+            candidates=(),
+        )
+        if self.drive_mode == "autonomous":
+            self.control_source = "autonomous"
 
         self.web_stream_clients = 0
         self.web_control_posts = 0
@@ -253,6 +293,48 @@ class RuntimeState:
             self.inference_latency_ms = latency_ms
             self.inference_frames += 1
 
+    def _evaluate_autonomous_locked(self) -> AutonomousDecision:
+        now = wall_time()
+        frame_shape = None if self.latest_frame is None else self.latest_frame.shape
+        decision = decide_autonomous_control(
+            list(self.predictions),
+            frame_shape=frame_shape,
+            now=now,
+            frame_time=self.latest_frame_at,
+            predictions_time=self.predictions_at,
+            config=AUTONOMOUS_CONFIG,
+        )
+        self.autonomous_decision = decision
+        return decision
+
+    def _apply_autonomous_control_locked(self) -> AutonomousDecision:
+        decision = self._evaluate_autonomous_locked()
+        self.control_armed = decision.active
+        self.control_source = "autonomous" if decision.active else "autonomous-safe"
+        self.steering = decision.steering
+        self.throttle = decision.throttle
+        self.control_updated_at = wall_time()
+        self.control_seq += 1
+        return decision
+
+    def set_drive_mode(self, mode: str) -> dict[str, Any]:
+        with self.lock:
+            self.drive_mode = normalize_drive_mode(mode)
+            if self.drive_mode == "autonomous":
+                self._apply_autonomous_control_locked()
+            else:
+                self.control_armed = False
+                self.control_source = "mode-manual"
+                self.steering = NEUTRAL_STEERING
+                self.throttle = NEUTRAL_THROTTLE
+                self.control_updated_at = wall_time()
+                self.control_seq += 1
+            return {
+                "mode": self.drive_mode,
+                "control": self.control_snapshot_locked(),
+                "autonomy": self.autonomous_decision.to_status(),
+            }
+
     def _apply_control_watchdog_locked(self) -> None:
         if (
             self.control_source == "web"
@@ -274,6 +356,7 @@ class RuntimeState:
     ) -> dict[str, Any]:
         with self.lock:
             self.web_control_posts += 1
+            self.drive_mode = "manual"
             if not ENABLE_WEB_CONTROL:
                 self.control_armed = False
                 self.control_source = "neutral"
@@ -290,6 +373,7 @@ class RuntimeState:
 
     def neutral(self, source: str = "neutral") -> dict[str, Any]:
         with self.lock:
+            self.drive_mode = "manual"
             self.control_armed = False
             self.control_source = source
             self.steering = NEUTRAL_STEERING
@@ -302,6 +386,7 @@ class RuntimeState:
         return {
             "armed": self.control_armed,
             "source": self.control_source,
+            "mode": self.drive_mode,
             "steering": self.steering,
             "throttle": self.throttle,
             "updated_age_sec": max(0.0, wall_time() - self.control_updated_at),
@@ -310,6 +395,9 @@ class RuntimeState:
 
     def get_control(self) -> tuple[float, float, dict[str, Any]]:
         with self.lock:
+            if self.drive_mode == "autonomous":
+                self._apply_autonomous_control_locked()
+                return self.steering, self.throttle, self.control_snapshot_locked()
             self._apply_control_watchdog_locked()
             return self.steering, self.throttle, self.control_snapshot_locked()
 
@@ -331,7 +419,10 @@ class RuntimeState:
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
-            self._apply_control_watchdog_locked()
+            if self.drive_mode == "autonomous":
+                self._apply_autonomous_control_locked()
+            else:
+                self._apply_control_watchdog_locked()
             now = wall_time()
             has_video = self.latest_frame is not None
             inference_age = (
@@ -370,6 +461,17 @@ class RuntimeState:
                     "backend": self.inference_backend,
                 },
                 "control": self.control_snapshot_locked(),
+                "autonomy": {
+                    "mode": self.drive_mode,
+                    "decision": self.autonomous_decision.to_status(),
+                    "config": {
+                        "min_confidence": AUTONOMOUS_CONFIG.min_confidence,
+                        "stale_prediction_sec": AUTONOMOUS_CONFIG.stale_prediction_sec,
+                        "max_frame_age_sec": AUTONOMOUS_CONFIG.max_frame_age_sec,
+                        "min_area_ratio": AUTONOMOUS_CONFIG.min_area_ratio,
+                        "near_area_ratio": AUTONOMOUS_CONFIG.near_area_ratio,
+                    },
+                },
                 "car": {
                     "battery": self.battery,
                     "telemetry": self.telemetry,
@@ -386,6 +488,13 @@ class RuntimeState:
 
 def rounded(value: float | None) -> float | None:
     return None if value is None else round(value, 3)
+
+
+def normalize_drive_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower()
+    if mode in {"auto", "autonomous", "autonomo", "autonomous-driving"}:
+        return "autonomous"
+    return "manual"
 
 
 def format_address(address: tuple[str, int] | None) -> str | None:
@@ -523,7 +632,7 @@ def draw_status_overlay(
     h, w = output.shape[:2]
     compact = w < 520 or h < 320
     panel_w = min(w - 16, 520 if not compact else w - 16)
-    panel_h = 76 if not compact else 42
+    panel_h = 104 if not compact else 66
     x0 = 12 if not compact else 8
     y0 = 12 if not compact else 8
     overlay = output.copy()
@@ -532,17 +641,23 @@ def draw_status_overlay(
 
     inf = state_snapshot["inference"]
     udp = state_snapshot["udp"]
+    control = state_snapshot["control"]
+    autonomy = state_snapshot.get("autonomy", {}).get("decision", {})
     det = inf["detections"]
     latency = inf["latency_ms"]
     latency_text = "-" if latency is None else f"{latency}ms"
     if compact:
-        lines = [f"f {context.seq}  det {det}  ia {inf['status']}"]
+        lines = [
+            f"f {context.seq}  det {det}  ia {inf['status']}",
+            f"{control['mode']} {control['steering']:.2f}/{control['throttle']:.2f}",
+        ]
         scale = 0.42
         y = y0 + 26
     else:
         lines = [
             f"frame {context.seq}  det {det}  ia {inf['status']}  {latency_text}",
             f"rx {udp['packets']}  tx {udp['tx_packets']}  cliente {udp['last_client'] or '-'}",
+            f"ctrl {control['mode']} {control['source']}  {control['steering']:.2f}/{control['throttle']:.2f}  auto {autonomy.get('action', '-')}",
         ]
         scale = 0.56
         y = y0 + 30
@@ -733,6 +848,20 @@ class LiveHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/mode", "/drive-mode"}:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(min(length, 8192)) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "invalid json"}, status=400)
+                return
+            mode = payload.get("mode")
+            if mode is None:
+                self.send_json({"ok": False, "error": "missing mode"}, status=400)
+                return
+            self.send_json({"ok": True, **self.state.set_drive_mode(str(mode))})
+            return
         if path in {"/control/neutral", "/neutral"}:
             self.send_json({"ok": True, "control": self.state.neutral("neutral")})
             return
@@ -935,6 +1064,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
     button:active { transform: translateY(1px); }
     button.primary { background: #1d6f47; border-color: #2b9c66; }
     button.danger { background: #6f2525; border-color: #b94842; }
+    button.active { background: #e8f1e6; border-color: #e8f1e6; color: #101315; }
 
     .app {
       height: 100%;
@@ -1060,11 +1190,41 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       border-width: 1px 0 0 0;
       border-radius: 0;
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(240px, 1fr) auto;
       align-items: center;
       gap: 14px;
       padding: 16px;
       background: var(--panel-2);
+    }
+
+    .drive-strip {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .mode-toggle {
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d1112;
+    }
+
+    .mode-toggle button {
+      height: 34px;
+      min-width: 82px;
+      border-radius: 5px;
+      padding: 0 10px;
+    }
+
+    .stop-button {
+      min-width: 78px;
+      height: 42px;
     }
 
     .axis-grid {
@@ -1181,6 +1341,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       main { grid-template-columns: 1fr; }
       .video-shell { min-height: 62vh; }
       .control-panel { grid-template-columns: 1fr; }
+      .drive-strip { justify-content: flex-start; flex-wrap: wrap; }
       .axis-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -1221,6 +1382,13 @@ LIVE_VIEW_HTML = r"""<!doctype html>
               <div class="bar"><div class="fill" id="throttle-fill"></div></div>
             </div>
           </div>
+          <div class="drive-strip">
+            <div class="mode-toggle" role="group" aria-label="Modo de conduccion">
+              <button type="button" id="mode-manual" class="active">Manual</button>
+              <button type="button" id="mode-auto">Auto</button>
+            </div>
+            <button type="button" id="stop" class="danger stop-button">Stop</button>
+          </div>
         </div>
       </section>
 
@@ -1240,6 +1408,15 @@ LIVE_VIEW_HTML = r"""<!doctype html>
           <div class="metric"><span>Backend</span><span id="backend">--</span></div>
           <div class="metric"><span>Latencia</span><span id="latency">--</span></div>
           <div class="detections" id="detections"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">Autonomia</div>
+          <div class="metric"><span>Modo</span><span id="drive-mode">--</span></div>
+          <div class="metric"><span>Accion</span><span id="auto-action">--</span></div>
+          <div class="metric"><span>Senal</span><span id="auto-target">--</span></div>
+          <div class="metric"><span>Zona</span><span id="auto-zone">--</span></div>
+          <div class="metric"><span>Motivo</span><span id="auto-reason">--</span></div>
         </section>
 
         <section class="section">
@@ -1263,6 +1440,9 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       throttleValue: document.getElementById('throttle-value'),
       steerFill: document.getElementById('steer-fill'),
       throttleFill: document.getElementById('throttle-fill'),
+      modeManual: document.getElementById('mode-manual'),
+      modeAuto: document.getElementById('mode-auto'),
+      stop: document.getElementById('stop'),
       topVideo: document.getElementById('top-video'),
       topAi: document.getElementById('top-ai'),
       topCar: document.getElementById('top-car'),
@@ -1283,6 +1463,11 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       backend: document.getElementById('backend'),
       latency: document.getElementById('latency'),
       detections: document.getElementById('detections'),
+      driveMode: document.getElementById('drive-mode'),
+      autoAction: document.getElementById('auto-action'),
+      autoTarget: document.getElementById('auto-target'),
+      autoZone: document.getElementById('auto-zone'),
+      autoReason: document.getElementById('auto-reason'),
       battery: document.getElementById('battery'),
       controlSource: document.getElementById('control-source'),
       watchdog: document.getElementById('watchdog'),
@@ -1291,10 +1476,17 @@ LIVE_VIEW_HTML = r"""<!doctype html>
 
     let keys = new Set();
     let lastControl = {steering: 0.25, throttle: 0.0};
+    let driveMode = 'manual';
 
     function setPill(el, state) {
       el.classList.remove('ok', 'warn', 'bad');
       el.classList.add(state);
+    }
+
+    function renderMode(mode) {
+      driveMode = mode === 'autonomous' ? 'autonomous' : 'manual';
+      els.modeManual.classList.toggle('active', driveMode === 'manual');
+      els.modeAuto.classList.toggle('active', driveMode === 'autonomous');
     }
 
     function axisFromKeys() {
@@ -1319,6 +1511,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
     }
 
     async function postControl(control) {
+      if (driveMode !== 'manual') return;
       try {
         const res = await fetch('/control', {
           method: 'POST',
@@ -1332,8 +1525,25 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       }
     }
 
+    async function postMode(mode) {
+      renderMode(mode);
+      keys.clear();
+      try {
+        const res = await fetch('/mode', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({mode}),
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`http ${res.status}`);
+      } catch (err) {
+        setPill(els.pillControl, 'bad');
+      }
+    }
+
     async function neutral() {
       keys.clear();
+      renderMode('manual');
       setPill(els.pillControl, 'bad');
       lastControl = {steering: 0.25, throttle: 0.0};
       renderAxis(lastControl);
@@ -1359,10 +1569,16 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       if (document.hidden) neutral();
     });
 
+    els.modeManual.addEventListener('click', () => postMode('manual'));
+    els.modeAuto.addEventListener('click', () => postMode('autonomous'));
+    els.stop.addEventListener('click', neutral);
+
     setInterval(() => {
-      lastControl = axisFromKeys();
-      renderAxis(lastControl);
-      postControl(lastControl);
+      if (driveMode === 'manual') {
+        lastControl = axisFromKeys();
+        renderAxis(lastControl);
+        postControl(lastControl);
+      }
     }, 50);
 
     async function pollStatus() {
@@ -1383,8 +1599,11 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         els.topCar.textContent = carOk ? 'ONLINE' : 'SIN RX';
         setPill(els.pillCar, carOk ? 'ok' : 'warn');
 
-        els.topControl.textContent = data.control.armed ? 'ON' : 'OFF';
-        setPill(els.pillControl, data.control.armed ? 'ok' : 'bad');
+        renderMode(data.control.mode || 'manual');
+        const autoDecision = data.autonomy?.decision || {};
+        const autoActive = data.control.mode === 'autonomous' && autoDecision.active;
+        els.topControl.textContent = data.control.mode === 'autonomous' ? (autoActive ? 'AUTO' : 'SAFE') : (data.control.armed ? 'ON' : 'OFF');
+        setPill(els.pillControl, data.control.armed ? 'ok' : (data.control.mode === 'autonomous' ? 'warn' : 'bad'));
 
         els.frame.textContent = `frame ${data.video.frames}`;
         els.badgeLatency.textContent = `lat ${data.inference.latency_ms ?? '--'}ms`;
@@ -1418,9 +1637,17 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         }
 
         els.battery.textContent = data.car.battery === null ? '--' : Number(data.car.battery).toFixed(2);
+        const auto = autoDecision;
+        const target = auto.target || null;
+        els.driveMode.textContent = data.control.mode || '--';
+        els.autoAction.textContent = auto.action || '--';
+        els.autoTarget.textContent = target ? target.class : '--';
+        els.autoZone.textContent = target ? `${target.zone} · ${target.distance}` : '--';
+        els.autoReason.textContent = auto.reason || '--';
+
         els.controlSource.textContent = `${data.control.source} · ${Number(data.control.steering).toFixed(2)} / ${Number(data.control.throttle).toFixed(2)}`;
         els.watchdog.textContent = `${Number(data.control.updated_age_sec).toFixed(2)}s`;
-        renderAxis(data.control.armed ? lastControl : data.control);
+        renderAxis(data.control.mode === 'manual' && data.control.armed ? lastControl : data.control);
         els.raw.textContent = JSON.stringify(data, null, 2);
       } catch (err) {
         setPill(els.pillCar, 'bad');

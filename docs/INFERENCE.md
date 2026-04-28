@@ -19,6 +19,7 @@ Inference is currently available on EPC using scripts from `servicios/`.
   - live car-control runtime on EPC
   - browser control updates EPC state while UDP control remains on EPC
   - can call a Roboflow-compatible endpoint for frame inference while the UDP control loop stays anchored on EPC
+  - can use those detections for EPC-local autonomous driving decisions when the operator enables autonomous mode
   - defaults live inference to Jetson at `http://100.115.99.8:9001`
   - default Jetson target is direct model inference with `ROBOFLOW_MODEL_ID=tp2-g4-2026/2`
   - exposes annotated live video, browser control, and inference status on `0.0.0.0:8088` for Tailscale operators
@@ -85,6 +86,7 @@ Requirements:
 - switchable from EPC scripts by configuration
 - fallback to EPC local inference when Jetson path fails
 - car continues talking only to EPC, never directly to Jetson
+- autonomous driving must treat Jetson output as inference only; steering/throttle policy remains in EPC `coche.py`/`autonomous_driver.py`
 
 Last validated Jetson configuration:
 

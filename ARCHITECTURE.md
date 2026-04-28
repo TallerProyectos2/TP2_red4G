@@ -13,7 +13,7 @@ TP2 runs as a four-machine lab, but the current critical path is script-based an
 
 1. Car attaches to LTE and gets UE IP from EPC. The previous fixed target was `172.16.0.2`; the live EPC HSS was observed on `2026-04-27` with dynamic allocation and the active session at `172.16.0.4`.
 2. Car sends UDP payloads (image/battery/runtime) to EPC control server.
-3. EPC script computes steering/throttle.
+3. EPC script computes steering/throttle in either manual web mode or autonomous mode.
 4. EPC sends UDP control packet back to car.
 
 This path works without introducing a new backend API layer.
@@ -75,8 +75,9 @@ This path works without introducing a new backend API layer.
   - payload discriminator byte (`I`, `B`, `D`)
   - control packet type (`C`) with steering/throttle doubles
 - Operator visibility:
-  - `coche.py` exposes annotated live video, remote manual control, and inference/control status from EPC on `8088/TCP`
+  - `coche.py` exposes annotated live video, remote manual control, autonomous mode, and inference/control status from EPC on `8088/TCP`
   - browser control updates EPC state only; EPC remains the only host that sends UDP commands to the car
+  - autonomous driving is an EPC-local decision layer over Roboflow detections; it does not move orchestration to Jetson or the car
 - Inference transport:
   - local HTTP endpoint (default `127.0.0.1:9001`) for Roboflow-compatible runtime
   - optional Jetson HTTP endpoint (`100.115.99.8:9001` when reachable)
@@ -87,6 +88,7 @@ This path works without introducing a new backend API layer.
 Inference is consumed by EPC through:
 
 - `coche.py` (live frame sender and annotation owner)
+- `autonomous_driver.py` (deterministic traffic-sign policy used by `coche.py`)
 - `inferencia.py` (CLI test and annotated output)
 - `start_local_inference_server.py` (optional EPC local fallback endpoint)
 
