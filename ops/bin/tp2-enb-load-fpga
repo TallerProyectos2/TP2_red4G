@@ -15,10 +15,21 @@ if [[ -z "${blade_cli}" ]]; then
   exit 1
 fi
 
+fpga_is_loaded() {
+  local version_output
+
+  version_output="$("${blade_cli}" -e version 2>&1 || true)"
+  grep -Eq 'FPGA version:[[:space:]]+[0-9]+(\.[0-9]+)+' <<<"${version_output}"
+}
+
 deadline=$((SECONDS + timeout_sec))
 while (( SECONDS < deadline )); do
   if "${blade_cli}" -p 2>/dev/null | grep -qi "bladeRF"; then
     echo "bladeRF detected"
+    if fpga_is_loaded; then
+      echo "FPGA already loaded; skipping bitstream write"
+      exit 0
+    fi
     exec "${blade_cli}" -l "${rbf_path}"
   fi
 

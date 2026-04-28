@@ -40,8 +40,9 @@ tp2_load_config() {
   : "${TP2_EPC_BACKHAUL_IP:=10.10.10.1}"
   : "${TP2_ENB_BACKHAUL_IP:=10.10.10.2}"
   : "${TP2_EPC_SGI_IP:=172.16.0.1}"
-  : "${TP2_CAR_IMSI:=901650000052126}"
   : "${TP2_CAR_UE_IP:=172.16.0.2}"
+  : "${TP2_CAR_SSH_USER:=}"
+  : "${TP2_CAR_SYSTEMD_SERVICE:=ARTEMIS.service}"
   : "${TP2_JETSON_INFERENCE_URL:=http://100.115.99.8:9001}"
   : "${TP2_ROBOFLOW_MODEL_ID:=tp2-g4-2026/2}"
 
@@ -77,6 +78,12 @@ tp2_load_config() {
   : "${TP2_WAIT_LTE_TIMEOUT_SEC:=90}"
   : "${TP2_WAIT_UE_TIMEOUT_SEC:=120}"
   : "${TP2_WAIT_HTTP_TIMEOUT_SEC:=60}"
+  : "${TP2_CAR_ATTACH_DELAY_SEC:=30}"
+  : "${TP2_CAR_RESTART_DELAY_SEC:=10}"
+  : "${TP2_CAR_SSH_SCAN_START:=2}"
+  : "${TP2_CAR_SSH_SCAN_END:=20}"
+  : "${TP2_CAR_SSH_DISCOVERY_TIMEOUT_SEC:=2}"
+  : "${TP2_CAR_SSH_PASSWORD:=}"
 }
 
 tp2_log() {
@@ -307,16 +314,121 @@ tp2_wait_s1() {
     tp2_check_s1_once
 }
 
+tp2_require_expect() {
+  command -v expect >/dev/null 2>&1 || tp2_die "expect is required for car SSH automation"
+}
+
+tp2_find_car_ssh_ip_once() {
+  local ue_ip_q
+  local sgi_prefix_q
+  local scan_start_q
+  local scan_end_q
+  local scan_timeout_q
+
+  printf -v ue_ip_q "%q" "${TP2_CAR_UE_IP}"
+  printf -v sgi_prefix_q "%q" "${TP2_EPC_SGI_IP%.*}"
+  printf -v scan_start_q "%q" "${TP2_CAR_SSH_SCAN_START}"
+  printf -v scan_end_q "%q" "${TP2_CAR_SSH_SCAN_END}"
+  printf -v scan_timeout_q "%q" "${TP2_CAR_SSH_DISCOVERY_TIMEOUT_SEC}"
+
+  tp2_remote_sh "${TP2_EPC_SSH}" "
+command -v ssh-keyscan >/dev/null 2>&1 || exit 127
+ue_ip=${ue_ip_q}
+sgi_prefix=${sgi_prefix_q}
+scan_start=${scan_start_q}
+scan_end=${scan_end_q}
+scan_timeout=${scan_timeout_q}
+
+if ssh-keyscan -T \"\${scan_timeout}\" \"\${ue_ip}\" >/dev/null 2>&1; then
+  printf '%s\n' \"\${ue_ip}\"
+  exit 0
+fi
+
+for host in \$(seq \"\${scan_start}\" \"\${scan_end}\"); do
+  candidate=\"\${sgi_prefix}.\${host}\"
+  if [[ \"\${candidate}\" == \"\${ue_ip}\" ]]; then
+    continue
+  fi
+  if ssh-keyscan -T \"\${scan_timeout}\" \"\${candidate}\" >/dev/null 2>&1; then
+    printf '%s\n' \"\${candidate}\"
+    exit 0
+  fi
+done
+
+exit 1
+"
+}
+
+tp2_wait_car_ssh_ip() {
+  local timeout_sec="${1:-${TP2_WAIT_UE_TIMEOUT_SEC}}"
+  local deadline=$((SECONDS + timeout_sec))
+  local car_ip=""
+
+  while (( SECONDS < deadline )); do
+    if car_ip="$(tp2_find_car_ssh_ip_once 2>/dev/null)" && [[ -n "${car_ip}" ]]; then
+      printf '%s\n' "${car_ip}"
+      return 0
+    fi
+    sleep 2
+  done
+
+  return 1
+}
+
+tp2_restart_car_service_via_epc() {
+  local car_ip="$1"
+
+  [[ -n "${TP2_CAR_SSH_USER:-}" ]] || tp2_die "TP2_CAR_SSH_USER is required to restart ${TP2_CAR_SYSTEMD_SERVICE} on the car"
+  [[ -n "${TP2_CAR_SSH_PASSWORD:-}" ]] || tp2_die "TP2_CAR_SSH_PASSWORD is required to restart ${TP2_CAR_SYSTEMD_SERVICE} on the car"
+  tp2_require_expect
+
+  tp2_log "Restarting ${TP2_CAR_SYSTEMD_SERVICE} on ${TP2_CAR_SSH_USER}@${car_ip} via EPC"
+  if ! EXPECT_EPC_SSH="${TP2_EPC_SSH}" \
+       EXPECT_CAR_SSH_USER="${TP2_CAR_SSH_USER}" \
+       EXPECT_CAR_SSH_IP="${car_ip}" \
+       EXPECT_CAR_SERVICE="${TP2_CAR_SYSTEMD_SERVICE}" \
+       EXPECT_CAR_PASSWORD="${TP2_CAR_SSH_PASSWORD}" \
+       EXPECT_SSH_TIMEOUT="${TP2_SSH_CONNECT_TIMEOUT_SEC}" \
+       expect <<'EOF'
+set timeout 60
+set epc $env(EXPECT_EPC_SSH)
+set car_user $env(EXPECT_CAR_SSH_USER)
+set car_ip $env(EXPECT_CAR_SSH_IP)
+set car_service $env(EXPECT_CAR_SERVICE)
+set car_password $env(EXPECT_CAR_PASSWORD)
+set ssh_timeout $env(EXPECT_SSH_TIMEOUT)
+
+set nested_cmd [format {ssh -tt -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=%s %s@%s 'sudo systemctl restart %s && sudo systemctl is-active --quiet %s'} $ssh_timeout $car_user $car_ip $car_service $car_service]
+spawn ssh -tt -o StrictHostKeyChecking=accept-new -o ConnectTimeout=$ssh_timeout $epc $nested_cmd
+expect {
+  -re {(?i)yes/no} { send "yes\r"; exp_continue }
+  -re {(?i)password.*:} { send "$car_password\r"; exp_continue }
+  eof
+}
+catch wait result
+if {[llength $result] >= 4} {
+  exit [lindex $result 3]
+}
+exit 0
+EOF
+  then
+    tp2_die "Could not restart ${TP2_CAR_SYSTEMD_SERVICE} on ${TP2_CAR_SSH_USER}@${car_ip} via EPC; check TP2_CAR_SSH_USER, TP2_CAR_SSH_PASSWORD, and car sudo access"
+  fi
+
+  tp2_log "Waiting ${TP2_CAR_RESTART_DELAY_SEC}s after car ${TP2_CAR_SYSTEMD_SERVICE} restart"
+  sleep "${TP2_CAR_RESTART_DELAY_SEC}"
+}
+
 tp2_wait_car_ue() {
   local timeout_sec="${1:-${TP2_WAIT_UE_TIMEOUT_SEC}}"
 
-  tp2_wait_remote "${TP2_EPC_SSH}" "${timeout_sec}" "car UE ${TP2_CAR_IMSI} reachable or recently attached" \
-    "latest_ip=\$(grep -F 'IMSI: ${TP2_CAR_IMSI}, UE IP:' /srv/tp2/logs/srsepc.log 2>/dev/null | tail -n 1 | sed -E 's/.*UE IP: ([0-9.]+).*/\\1/'); test -n \"\${latest_ip}\" || ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1"
+  tp2_wait_remote "${TP2_EPC_SSH}" "${timeout_sec}" "car UE ${TP2_CAR_UE_IP} reachable or recently attached" \
+    "ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1 || grep -q 'UE IP: ${TP2_CAR_UE_IP}' /srv/tp2/logs/srsepc.log"
 }
 
 tp2_check_car_ue_once() {
   tp2_remote_sh "${TP2_EPC_SSH}" \
-    "latest_ip=\$(grep -F 'IMSI: ${TP2_CAR_IMSI}, UE IP:' /srv/tp2/logs/srsepc.log 2>/dev/null | tail -n 1 | sed -E 's/.*UE IP: ([0-9.]+).*/\\1/'); test -n \"\${latest_ip}\" || ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1" \
+    "ping -c 1 -W 1 ${TP2_CAR_UE_IP} >/dev/null 2>&1 || grep -q 'UE IP: ${TP2_CAR_UE_IP}' /srv/tp2/logs/srsepc.log" \
     >/dev/null 2>&1
 }
 
