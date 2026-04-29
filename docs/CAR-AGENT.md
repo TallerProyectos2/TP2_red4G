@@ -38,10 +38,10 @@ Normal sessions use one EPC runtime from `servicios/`:
 - Web autonomous mode:
   - operator toggles manual/autonomous from the same web UI
   - EPC uses fresh Roboflow detections to choose continue, turn, stop, crawl, slow, or faster cruise
-  - autonomous forward movement uses positive throttle `+0.50`; stop, ambiguity, stale frame or stale inference still force neutral `0.0`
+  - autonomous forward movement uses positive throttle `+0.65`; stop, ambiguity, stale frame or stale inference still force neutral `0.0`
   - nearest/relevant signs are selected by bounding-box area, confidence, persistence, image zone (`left`, `center`, `right`), and maneuver state
-  - detections are tracked across frames so one noisy frame does not immediately trigger a turn/speed change
-  - the FSM holds stops, maintains turns briefly, and applies cooldowns to avoid repeating the same sign
+  - detections are tracked across frames; default turn decisions trigger on the first valid confirmed frame to reduce reaction delay
+  - the FSM holds stops, maintains 90-degree open-loop turns for the configured maneuver window, and applies cooldowns to avoid repeating the same sign
   - stale frame or stale inference state forces neutral instead of continuing on old detections
 - Dataset recording mode:
   - web/API controlled session recorder saves image candidates and `manifest.jsonl`

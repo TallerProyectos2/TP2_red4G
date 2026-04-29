@@ -58,7 +58,9 @@ The manual order below remains the operational source for troubleshooting.
 - `coche.py` exposes the live operator web view on `8088/TCP` when used as the control runtime.
 - `coche.py` accepts direct remote manual control over the web view and falls back to neutral when web commands stop.
 - `coche.py` exposes `POST /mode` for `manual`/`autonomous`; autonomous mode falls back to neutral when frames or inference become stale.
-- Autonomous forward movement defaults to positive throttle `+0.50`; reverse throttle is not emitted by the autonomous controller.
+- Autonomous forward movement defaults to positive throttle `+0.65`; reverse throttle is not emitted by the autonomous controller.
+- Autonomous inference cadence defaults to `0.10 s` minimum spacing between submitted frames.
+- Turn signs trigger on the first valid confirmed detection by default and execute an open-loop 90-degree maneuver window (`TP2_AUTONOMOUS_TURN_HOLD_SEC`, default `1.20 s`; `TP2_AUTONOMOUS_TURN_DEGREES`, default `90`).
 - `coche.py` exposes `POST /recording` and `GET /recording.json` for session capture; recordings include candidate frames, annotated MP4 video, predictions, critical flags, autonomous estimates, and selected controls.
 - Normal `tp2-car-control.service` sessions autostart recording under `/srv/tp2/frames/autonomous` and write `manifest.jsonl`, `labels.jsonl`, `critical.jsonl`, `session.mp4`, and optional critical images.
 - The live web UI can launch the retraining/replayer server with `POST /replayer/start`; the replayer reads `/srv/tp2/frames/autonomous` directly and provides a session selector.

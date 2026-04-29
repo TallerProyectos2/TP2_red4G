@@ -108,8 +108,8 @@ Eso puede existir en el futuro como capa adicional, pero no es requisito para se
 - Selector web manual/autonomo:
   - manual: navegador publica giro/gas y watchdog vuelve a neutro si deja de publicar.
   - autonomo: EPC decide desde detecciones Roboflow recientes, priorizando señales persistentes y cercanas por area de bounding box, zona izquierda/centro/derecha y estado de maniobra.
-  - throttle autonomo: las acciones de avance usan `+0.50`; las paradas, ambiguedad o fallbacks por datos obsoletos usan neutro.
-  - tracking/FSM: confirma señales durante varios frames, mantiene `STOP`, ejecuta giros durante una ventana controlada y aplica cooldown para no repetir la misma señal.
+  - throttle autonomo: las acciones de avance usan `+0.65`; las paradas, ambiguedad o fallbacks por datos obsoletos usan neutro.
+  - tracking/FSM: confirma señales desde el primer frame valido por defecto, mantiene `STOP`, ejecuta giros calibrados como maniobra abierta de 90 grados durante una ventana controlada y aplica cooldown para no repetir la misma señal.
   - fallback: sin frame o inferencia fresca, EPC manda neutro.
   - dataset: la web y el servicio pueden activar grabacion de sesion; el servicio normal arranca con captura por defecto para generar `manifest.jsonl`, `labels.jsonl`, `critical.jsonl` y `session.mp4` antes de curar/reentrenar.
   - inferencia live: `coche.py` usa `inference_sdk` con frames NumPy de OpenCV, sin JPEG temporal en disco.

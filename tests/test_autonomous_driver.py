@@ -92,10 +92,10 @@ class AutonomousDriverTest(unittest.TestCase):
         fast = self.decide_confirmed([prediction(SIGN_SPEED_90, x=320, width=150, height=150)])
         self.assertEqual(slow.action, "speed-30")
         self.assertEqual(fast.action, "speed-90")
-        self.assertEqual(slow.raw_throttle, 0.5)
-        self.assertEqual(fast.raw_throttle, 0.5)
-        self.assertEqual(slow.throttle, 0.5)
-        self.assertEqual(fast.throttle, 0.5)
+        self.assertEqual(slow.raw_throttle, 0.65)
+        self.assertEqual(fast.raw_throttle, 0.65)
+        self.assertEqual(slow.throttle, 0.65)
+        self.assertEqual(fast.throttle, 0.65)
 
     def test_far_stop_approaches_instead_of_full_stop(self):
         decision = self.decide([prediction(SIGN_STOP, x=320, width=50, height=50)])
@@ -110,9 +110,9 @@ class AutonomousDriverTest(unittest.TestCase):
         )
         self.assertEqual(decision.action, "continue")
         self.assertGreater(decision.throttle, self.config.neutral_throttle)
-        self.assertEqual(decision.raw_throttle, 0.5)
+        self.assertEqual(decision.raw_throttle, 0.65)
 
-    def test_forward_autonomous_actions_use_positive_half_throttle(self):
+    def test_forward_autonomous_actions_use_positive_065_throttle(self):
         decisions = [
             self.decide([]),
             self.decide([prediction(SIGN_STOP, x=320, width=50, height=50)]),
@@ -121,7 +121,7 @@ class AutonomousDriverTest(unittest.TestCase):
         ]
         for decision in decisions:
             self.assertGreater(decision.raw_throttle, 0.0)
-            self.assertEqual(decision.raw_throttle, 0.5)
+            self.assertEqual(decision.raw_throttle, 0.65)
             self.assertGreaterEqual(decision.throttle, 0.0)
 
     def test_negative_autonomous_throttle_config_never_reverses(self):
@@ -181,6 +181,36 @@ class AutonomousDriverTest(unittest.TestCase):
         decision = self.decide([prediction(SIGN_STOP, x=320, width=180, height=180)])
         self.assertEqual(decision.state, STATE_STOP_HOLD)
         self.assertEqual(decision.action, "stop")
+
+    def test_turn_starts_on_first_detection_for_faster_decision(self):
+        decision = self.decide([prediction(SIGN_TURN_LEFT, x=160, width=180, height=180)])
+        self.assertEqual(decision.action, "turn-left")
+        self.assertEqual(decision.raw_throttle, 0.65)
+        self.assertIn("turn-90", decision.reason)
+
+    def test_turn_hold_is_configured_for_ninety_degree_maneuver(self):
+        controller = AutonomousController(self.config)
+        first = controller.decide(
+            [prediction(SIGN_TURN_RIGHT, x=480, width=180, height=180)],
+            frame_shape=FRAME_SHAPE,
+            now=NOW,
+            frame_time=NOW - 0.05,
+            predictions_time=NOW - 0.05,
+            prediction_seq=1,
+        )
+        held = controller.decide(
+            [],
+            frame_shape=FRAME_SHAPE,
+            now=NOW + self.config.turn_hold_sec - 0.01,
+            frame_time=NOW + self.config.turn_hold_sec - 0.06,
+            predictions_time=NOW + self.config.turn_hold_sec - 0.06,
+            prediction_seq=2,
+        )
+
+        self.assertEqual(first.action, "turn-right")
+        self.assertEqual(first.throttle, 0.65)
+        self.assertEqual(held.action, "turn-right")
+        self.assertEqual(held.state, first.state)
 
 
 if __name__ == "__main__":

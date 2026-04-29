@@ -84,7 +84,7 @@ CONTROL_TIMEOUT_SEC = env_float("TP2_WEB_CONTROL_TIMEOUT_SEC", 0.45)
 CONTROL_TX_HZ = max(1.0, env_float("TP2_CONTROL_TX_HZ", 20.0))
 CLIENT_ADDR_TTL_SEC = env_float("TP2_CLIENT_ADDR_TTL_SEC", 3.0)
 
-INFERENCE_MIN_INTERVAL_SEC = env_float("TP2_INFERENCE_MIN_INTERVAL_SEC", 0.18)
+INFERENCE_MIN_INTERVAL_SEC = env_float("TP2_INFERENCE_MIN_INTERVAL_SEC", 0.10)
 INFERENCE_RETRY_SEC = env_float("TP2_INFERENCE_RETRY_SEC", 2.0)
 INFERENCE_MIN_CONFIDENCE = env_float("TP2_INFERENCE_MIN_CONFIDENCE", 0.20)
 OVERLAY_MAX_AGE_SEC = env_float("TP2_OVERLAY_MAX_AGE_SEC", 1.25)
@@ -104,14 +104,14 @@ AUTONOMOUS_CONFIG = AutonomousConfig(
     center_right=env_float("TP2_AUTONOMOUS_CENTER_RIGHT", 0.60),
     neutral_steering=NEUTRAL_STEERING,
     neutral_throttle=NEUTRAL_THROTTLE,
-    crawl_throttle=env_float("TP2_AUTONOMOUS_CRAWL_THROTTLE", 0.50),
-    slow_throttle=env_float("TP2_AUTONOMOUS_SLOW_THROTTLE", 0.50),
-    turn_throttle=env_float("TP2_AUTONOMOUS_TURN_THROTTLE", 0.50),
-    cruise_throttle=env_float("TP2_AUTONOMOUS_CRUISE_THROTTLE", 0.50),
-    fast_throttle=env_float("TP2_AUTONOMOUS_FAST_THROTTLE", 0.50),
+    crawl_throttle=env_float("TP2_AUTONOMOUS_CRAWL_THROTTLE", 0.65),
+    slow_throttle=env_float("TP2_AUTONOMOUS_SLOW_THROTTLE", 0.65),
+    turn_throttle=env_float("TP2_AUTONOMOUS_TURN_THROTTLE", 0.65),
+    cruise_throttle=env_float("TP2_AUTONOMOUS_CRUISE_THROTTLE", 0.65),
+    fast_throttle=env_float("TP2_AUTONOMOUS_FAST_THROTTLE", 0.65),
     left_steering=env_float("TP2_AUTONOMOUS_LEFT_STEERING", 0.84),
     right_steering=env_float("TP2_AUTONOMOUS_RIGHT_STEERING", -0.84),
-    confirm_frames=env_int("TP2_AUTONOMOUS_CONFIRM_FRAMES", 2),
+    confirm_frames=env_int("TP2_AUTONOMOUS_CONFIRM_FRAMES", 1),
     safety_confirm_frames=env_int("TP2_AUTONOMOUS_SAFETY_CONFIRM_FRAMES", 1),
     max_track_age_sec=env_float("TP2_AUTONOMOUS_MAX_TRACK_AGE_SEC", 1.2),
     track_memory_sec=env_float("TP2_AUTONOMOUS_TRACK_MEMORY_SEC", 0.45),
@@ -119,7 +119,8 @@ AUTONOMOUS_CONFIG = AutonomousConfig(
     match_center_distance=env_float("TP2_AUTONOMOUS_MATCH_CENTER_DISTANCE", 0.18),
     ambiguous_score_ratio=env_float("TP2_AUTONOMOUS_AMBIGUOUS_SCORE_RATIO", 0.82),
     stop_hold_sec=env_float("TP2_AUTONOMOUS_STOP_HOLD_SEC", 1.15),
-    turn_hold_sec=env_float("TP2_AUTONOMOUS_TURN_HOLD_SEC", 0.75),
+    turn_hold_sec=env_float("TP2_AUTONOMOUS_TURN_HOLD_SEC", 1.20),
+    turn_degrees=env_int("TP2_AUTONOMOUS_TURN_DEGREES", 90),
     cooldown_sec=env_float("TP2_AUTONOMOUS_COOLDOWN_SEC", 0.85),
     distance_scale=env_float("TP2_AUTONOMOUS_DISTANCE_SCALE", 0.32),
     steering_rate_per_sec=env_float("TP2_AUTONOMOUS_STEERING_RATE_PER_SEC", 2.4),
@@ -1412,6 +1413,7 @@ class RuntimeState:
                         "safety_confirm_frames": AUTONOMOUS_CONFIG.safety_confirm_frames,
                         "stop_hold_sec": AUTONOMOUS_CONFIG.stop_hold_sec,
                         "turn_hold_sec": AUTONOMOUS_CONFIG.turn_hold_sec,
+                        "turn_degrees": AUTONOMOUS_CONFIG.turn_degrees,
                         "cooldown_sec": AUTONOMOUS_CONFIG.cooldown_sec,
                         "dry_run": AUTONOMOUS_CONFIG.dry_run,
                     },

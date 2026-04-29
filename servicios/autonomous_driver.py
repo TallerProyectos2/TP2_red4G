@@ -49,14 +49,14 @@ class AutonomousConfig:
     center_right: float = 0.60
     neutral_steering: float = 0.25
     neutral_throttle: float = 0.0
-    crawl_throttle: float = 0.50
-    slow_throttle: float = 0.50
-    turn_throttle: float = 0.50
-    cruise_throttle: float = 0.50
-    fast_throttle: float = 0.50
+    crawl_throttle: float = 0.65
+    slow_throttle: float = 0.65
+    turn_throttle: float = 0.65
+    cruise_throttle: float = 0.65
+    fast_throttle: float = 0.65
     left_steering: float = 0.84
     right_steering: float = -0.84
-    confirm_frames: int = 2
+    confirm_frames: int = 1
     safety_confirm_frames: int = 1
     max_track_age_sec: float = 1.2
     track_memory_sec: float = 0.45
@@ -64,7 +64,8 @@ class AutonomousConfig:
     match_center_distance: float = 0.18
     ambiguous_score_ratio: float = 0.82
     stop_hold_sec: float = 1.15
-    turn_hold_sec: float = 0.75
+    turn_hold_sec: float = 1.20
+    turn_degrees: int = 90
     cooldown_sec: float = 0.85
     distance_scale: float = 0.32
     steering_rate_per_sec: float = 2.4
@@ -550,9 +551,10 @@ class AutonomousController:
             throttle=min(self.config.turn_throttle, self.speed_cap),
             action="turn-left" if left else "turn-right",
             state=self.state,
-            reason=f"{target.label}:{target.distance}-{target.zone}",
+            reason=f"{target.label}:{target.distance}-{target.zone}:turn-{self.config.turn_degrees}",
             target=target,
             candidates=tuple(observations),
+            urgent=True,
         )
 
     def _decision(
