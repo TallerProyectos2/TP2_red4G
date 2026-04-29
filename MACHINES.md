@@ -20,6 +20,7 @@ Do not store passwords here.
   - control scripts from `servicios/`
   - local inference endpoint from `servicios/`
   - autonomous driving policy from `servicios/autonomous_driver.py`
+  - lane stabilization from `servicios/lane_detector.py`
   - dataset/session recorder from `servicios/coche.py`
 - Known addresses:
   - upstream (`eno1`): `10.0.128.174/24` (DHCP)

@@ -40,6 +40,7 @@ Normal sessions use one EPC runtime from `servicios/`:
   - EPC uses fresh Roboflow detections to choose continue, turn, stop, crawl, slow, or faster cruise
   - autonomous forward movement uses positive throttle `+0.65`; stop, ambiguity, stale frame or stale inference still force neutral `0.0`
   - outgoing UDP steering is trimmed by `TP2_STEERING_TRIM` before packet send; current default `-0.08` compensates the physical left drift with a small rightward correction
+  - `coche.py` also runs OpenCV lane assist on the camera frame: it detects the continuous blue/green tape lines on the carpet, estimates the current corridor, and applies a bounded steering correction only during autonomous forward actions
   - nearest/relevant signs are selected by bounding-box area, confidence, persistence, image zone (`left`, `center`, `right`), and maneuver state
   - default sign thresholds are tuned to act on slightly smaller/farther signs, so STOP and turn decisions begin before the car reaches the sign
   - detections are tracked across frames; default turn decisions trigger on the first valid confirmed frame to reduce reaction delay
@@ -74,7 +75,7 @@ Normal sessions use one EPC runtime from `servicios/`:
 - `coche.py` is the only normal car runtime in `servicios/`.
 - `coche.py` exposes the live camera/inference/operator status and remote manual control web view on `8088/TCP`; use `http://100.97.19.112:8088/` from Tailscale during normal EPC-run sessions.
 - Browser control is direct only in manual mode once the operator opens the web UI. Neutral manual posts do not arm the control path, and the watchdog returns active manual commands to neutral instead of holding the last throttle. Manual control release does not leave autonomous mode; the Stop button is the explicit manual neutral stop.
-- The web UI exposes `POST /mode` for `manual` and `autonomous`. Manual is the safe default; autonomous should only be enabled after live camera frames and inference are visible.
+- The web UI exposes `POST /mode` for `manual` and `autonomous`. Manual is the safe default; autonomous should only be enabled after live camera frames, inference, and lane status are visible.
 - The web UI exposes `POST /recording` for dataset capture. Default recording state is controlled by `TP2_SESSION_RECORD_AUTOSTART`; normal systemd operation records sessions by default for retraining evidence.
 - `scripts_profesor/car1_grupo4.py` is a professor-style manual-control server adapted for Grupo 4. It intentionally keeps the professor script behavior and binds the LTE runtime address `172.16.0.1:20001`, so do not run it at the same time as `tp2-car-control.service`.
 - `coche.py` defaults its live inference endpoint to Jetson at `http://100.115.99.8:9001` using direct model inference (`TP2_INFERENCE_TARGET=model`, `ROBOFLOW_MODEL_ID=tp2-g4-2026/2`); override these variables only when intentionally using another backend.

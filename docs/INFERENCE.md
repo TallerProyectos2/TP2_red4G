@@ -20,6 +20,7 @@ Inference is currently available on EPC using scripts from `servicios/`.
   - browser control updates EPC state while UDP control remains on EPC
   - can call a Roboflow-compatible endpoint for frame inference while the UDP control loop stays anchored on EPC
   - can use those detections for EPC-local autonomous driving decisions when the operator enables autonomous mode
+  - also runs local OpenCV lane detection in EPC for tape-line steering stabilization; this does not use Roboflow or Jetson
   - can record frames, annotated MP4 video, prediction candidates, critical flags, autonomous estimates, and commands for later dataset curation/retraining
   - live inference passes OpenCV NumPy arrays directly to `inference_sdk`, avoiding a temporary JPEG write per request
   - defaults live inference to Jetson at `http://100.115.99.8:9001`

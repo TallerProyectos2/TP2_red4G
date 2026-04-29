@@ -61,11 +61,13 @@ Operational files are stored in repo `servicios/` and validated on EPC under `/h
 - Car web/control runtime:
   - `coche.py` (`172.16.0.1:20001` UDP, `0.0.0.0:8088` web)
   - `autonomous_driver.py` deterministic autonomous controller used by `coche.py`
+  - `lane_detector.py` OpenCV lane detector for the blue/green tape corridors; used by `coche.py` as bounded steering stabilization in autonomous forward actions
   - session recorder under `TP2_SESSION_RECORD_DIR` for dataset candidates, annotated MP4, critical flags, and offline relabeling inputs
   - `session_replayer.py` review server for frame replay and label correction, launchable from the `coche.py` web UI and backed by a session selector over the recording root
   - manual web control is gated by drive mode; stale manual posts cannot switch an active autonomous session back to manual
   - autonomous forward commands are clamped to non-negative throttle and default to `+0.65`
   - outgoing UDP steering applies `TP2_STEERING_TRIM=-0.08` by default to compensate the current physical left drift; `/status.json` exposes `effective_steering`
+  - lane assist defaults to enabled (`TP2_LANE_ASSIST_ENABLED=1`) and exposes `lane.status`, `lane.guidance`, and `lane.applied_correction` in `/status.json`
   - autonomous inference submits frames every `0.07 s` by default when frames are available
   - autonomous sign filtering accepts smaller/farther signs by default (`TP2_AUTONOMOUS_MIN_AREA_RATIO=0.003`, `TP2_AUTONOMOUS_NEAR_AREA_RATIO=0.030`) so STOP and turn decisions begin earlier
   - turn signs trigger from the first valid confirmed detection and use a timed 90-degree open-loop maneuver by default

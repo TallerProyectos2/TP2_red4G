@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import unittest
+
+import cv2
+import numpy as np
+
+from lane_detector import LaneDetector, LaneDetectorConfig, draw_lane_overlay
+
+
+FRAME_SHAPE = (480, 640, 3)
+CYAN_BGR = (220, 220, 35)
+GREEN_BGR = (80, 220, 80)
+
+
+def lane_frame(lines: list[tuple[int, int]], *, color=CYAN_BGR) -> np.ndarray:
+    frame = np.zeros(FRAME_SHAPE, dtype=np.uint8)
+    frame[:, :] = (22, 22, 24)
+    for x_lower, x_upper in lines:
+        cv2.line(frame, (x_upper, 180), (x_lower, 440), color, 14, cv2.LINE_AA)
+    return frame
+
+
+class LaneDetectorTest(unittest.TestCase):
+    def config(self) -> LaneDetectorConfig:
+        return LaneDetectorConfig(
+            smoothing_alpha=1.0,
+            min_confidence=0.25,
+            stale_sec=0.30,
+            expected_lane_width_ratio=0.38,
+        )
+
+    def test_centered_lane_has_small_correction(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(lane_frame([(205, 250), (435, 390)]), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertEqual(guidance.source, "pair")
+        self.assertLess(abs(guidance.correction), 0.04)
+        self.assertAlmostEqual(guidance.lane_width, 230 / 640, delta=0.08)
+
+    def test_lane_center_to_right_commands_right_correction(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(lane_frame([(300, 320), (570, 520)]), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertGreater(guidance.center_error, 0.0)
+        self.assertLess(guidance.correction, -0.06)
+
+    def test_three_lines_select_corridor_containing_camera_center(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(lane_frame([(95, 150), (305, 320), (565, 515)]), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertEqual(guidance.source, "pair")
+        self.assertGreaterEqual(guidance.line_count, 3)
+        self.assertGreater(guidance.lane_center_lower, 0.5)
+        self.assertLess(guidance.correction, 0.0)
+
+    def test_single_line_uses_recent_lane_width_with_lower_confidence(self):
+        detector = LaneDetector(self.config())
+        first = detector.detect(lane_frame([(210, 250), (450, 405)]), now=1.0)
+        self.assertTrue(first.detected)
+
+        guidance = detector.detect(lane_frame([(450, 405)], color=GREEN_BGR), now=1.1)
+
+        self.assertTrue(guidance.detected)
+        self.assertIn(guidance.source, {"single-right", "single-left"})
+        self.assertGreater(guidance.confidence, 0.0)
+        self.assertLess(guidance.confidence, first.confidence)
+
+    def test_overlay_preserves_frame_shape(self):
+        config = self.config()
+        detector = LaneDetector(config)
+        frame = lane_frame([(205, 250), (435, 390)])
+        guidance = detector.detect(frame, now=1.0)
+
+        overlay = draw_lane_overlay(frame, guidance, config)
+
+        self.assertEqual(overlay.shape, frame.shape)
+
+
+if __name__ == "__main__":
+    unittest.main()

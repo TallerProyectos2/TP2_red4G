@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +29,12 @@ from autonomous_driver import (  # noqa: E402
     AutonomousConfig,
     AutonomousController,
     AutonomousDecision,
+)
+from lane_detector import (  # noqa: E402
+    LaneDetector,
+    LaneDetectorConfig,
+    LaneGuidance,
+    draw_lane_overlay,
 )
 from roboflow_runtime import (  # noqa: E402
     InferenceConfig,
@@ -66,6 +72,14 @@ def env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def env_csv_set(name: str, default: set[str]) -> set[str]:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return set(default)
+    values = {item.strip() for item in raw.split(",")}
+    return {item for item in values if item}
 
 
 BIND_IP = os.getenv("TP2_BIND_IP", "172.16.0.1")
@@ -128,6 +142,45 @@ AUTONOMOUS_CONFIG = AutonomousConfig(
     throttle_rate_per_sec=env_float("TP2_AUTONOMOUS_THROTTLE_RATE_PER_SEC", 1.0),
     brake_rate_per_sec=env_float("TP2_AUTONOMOUS_BRAKE_RATE_PER_SEC", 3.0),
     dry_run=env_bool("TP2_AUTONOMOUS_DRY_RUN", False),
+)
+
+LANE_CONFIG = LaneDetectorConfig(
+    enabled=env_bool("TP2_LANE_ASSIST_ENABLED", True),
+    roi_top_ratio=env_float("TP2_LANE_ROI_TOP_RATIO", 0.34),
+    roi_bottom_margin_ratio=env_float("TP2_LANE_ROI_BOTTOM_MARGIN_RATIO", 0.02),
+    target_center_x=env_float("TP2_LANE_TARGET_CENTER_X", 0.50),
+    lower_sample_y=env_float("TP2_LANE_LOWER_SAMPLE_Y", 0.86),
+    upper_sample_y=env_float("TP2_LANE_UPPER_SAMPLE_Y", 0.58),
+    hsv_lower=(
+        env_int("TP2_LANE_H_MIN", 42),
+        env_int("TP2_LANE_S_MIN", 45),
+        env_int("TP2_LANE_V_MIN", 55),
+    ),
+    hsv_upper=(
+        env_int("TP2_LANE_H_MAX", 105),
+        env_int("TP2_LANE_S_MAX", 255),
+        env_int("TP2_LANE_V_MAX", 255),
+    ),
+    road_gray_max=env_int("TP2_LANE_ROAD_GRAY_MAX", 125),
+    road_context_dilate_px=env_int("TP2_LANE_ROAD_CONTEXT_DILATE_PX", 33),
+    min_component_area_ratio=env_float("TP2_LANE_MIN_COMPONENT_AREA_RATIO", 0.00016),
+    min_line_height_ratio=env_float("TP2_LANE_MIN_LINE_HEIGHT_RATIO", 0.11),
+    max_fit_error_ratio=env_float("TP2_LANE_MAX_FIT_ERROR_RATIO", 0.055),
+    cluster_px_ratio=env_float("TP2_LANE_CLUSTER_PX_RATIO", 0.055),
+    min_lane_width_ratio=env_float("TP2_LANE_MIN_WIDTH_RATIO", 0.18),
+    max_lane_width_ratio=env_float("TP2_LANE_MAX_WIDTH_RATIO", 0.72),
+    expected_lane_width_ratio=env_float("TP2_LANE_EXPECTED_WIDTH_RATIO", 0.38),
+    single_line_confidence_scale=env_float("TP2_LANE_SINGLE_LINE_CONFIDENCE_SCALE", 0.58),
+    stale_sec=env_float("TP2_LANE_STALE_SEC", 0.45),
+    min_confidence=env_float("TP2_LANE_MIN_CONFIDENCE", 0.34),
+    steering_gain=env_float("TP2_LANE_STEERING_GAIN", 0.78),
+    heading_gain=env_float("TP2_LANE_HEADING_GAIN", 0.34),
+    max_correction=env_float("TP2_LANE_MAX_CORRECTION", 0.24),
+    smoothing_alpha=env_float("TP2_LANE_SMOOTHING_ALPHA", 0.38),
+)
+LANE_ASSIST_ACTIONS = env_csv_set(
+    "TP2_LANE_ASSIST_ACTIONS",
+    {"continue", "speed-30", "speed-90", "approach-stop", "confirming", "cooldown"},
 )
 
 SESSION_RECORD_DIR = Path(os.getenv("TP2_SESSION_RECORD_DIR", "/srv/tp2/frames/autonomous")).expanduser()
@@ -946,6 +999,15 @@ class RuntimeState:
         self.latest_frame_seq = 0
         self.latest_frame_at: float | None = None
         self.frame_decode_errors = 0
+        self.lane_detector = LaneDetector(LANE_CONFIG)
+        self.lane_guidance: LaneGuidance | None = None
+        self.lane_guidance_at: float | None = None
+        self.lane_frames = 0
+        self.lane_errors = 0
+        self.lane_error: str | None = None
+        self.lane_assist_active = False
+        self.lane_assist_correction = 0.0
+        self.lane_assist_reason = "not-evaluated"
 
         self.battery: float | None = None
         self.telemetry: Any = None
@@ -1037,10 +1099,27 @@ class RuntimeState:
             self.telemetry = summarize_payload(value)
 
     def update_frame(self, frame: np.ndarray) -> int:
+        now = wall_time()
+        lane_guidance: LaneGuidance | None = None
+        lane_error: str | None = None
+        if LANE_CONFIG.enabled:
+            try:
+                lane_guidance = self.lane_detector.detect(frame, now=now)
+            except Exception as exc:
+                lane_error = str(exc)[:240]
         with self.frame_cond:
             self.latest_frame = frame
             self.latest_frame_seq += 1
-            self.latest_frame_at = wall_time()
+            self.latest_frame_at = now
+            if LANE_CONFIG.enabled:
+                if lane_guidance is not None:
+                    self.lane_guidance = lane_guidance
+                    self.lane_guidance_at = now
+                    self.lane_frames += 1
+                    self.lane_error = None
+                elif lane_error is not None:
+                    self.lane_errors += 1
+                    self.lane_error = lane_error
             seq = self.latest_frame_seq
             self.frame_cond.notify_all()
             return seq
@@ -1156,8 +1235,55 @@ class RuntimeState:
             predictions_time=self.predictions_at,
             prediction_seq=self.predictions_seq,
         )
+        decision = self._apply_lane_assist_locked(decision, now)
         self.autonomous_decision = decision
         return decision
+
+    def _apply_lane_assist_locked(
+        self,
+        decision: AutonomousDecision,
+        now: float,
+    ) -> AutonomousDecision:
+        self.lane_assist_active = False
+        self.lane_assist_correction = 0.0
+
+        if not LANE_CONFIG.enabled:
+            self.lane_assist_reason = "disabled"
+            return decision
+        if self.drive_mode != "autonomous":
+            self.lane_assist_reason = "manual-mode"
+            return decision
+        if not decision.active:
+            self.lane_assist_reason = f"autonomy-{decision.reason}"
+            return decision
+        if decision.throttle <= max(0.05, NEUTRAL_THROTTLE + 0.02):
+            self.lane_assist_reason = "not-moving-forward"
+            return decision
+        if decision.action not in LANE_ASSIST_ACTIONS:
+            self.lane_assist_reason = f"action-{decision.action}"
+            return decision
+
+        guidance = self.current_lane_guidance_locked(now=now)
+        if guidance is None:
+            self.lane_assist_reason = "no-lane"
+            return decision
+        if not guidance.is_usable(LANE_CONFIG):
+            self.lane_assist_reason = f"lane-unusable:{guidance.reason}"
+            return decision
+
+        correction = clamp(guidance.correction, -LANE_CONFIG.max_correction, LANE_CONFIG.max_correction, 0.0)
+        steering = round(clamp(decision.steering + correction, -1.0, 1.0, NEUTRAL_STEERING), 3)
+        raw_base = decision.raw_steering if decision.raw_steering is not None else decision.steering
+        raw_steering = round(clamp(raw_base + correction, -1.0, 1.0, NEUTRAL_STEERING), 3)
+        self.lane_assist_active = True
+        self.lane_assist_correction = round(correction, 3)
+        self.lane_assist_reason = f"{guidance.source}:{guidance.reason}"
+        return replace(
+            decision,
+            steering=steering,
+            raw_steering=raw_steering,
+            reason=f"{decision.reason};lane={guidance.source}:{correction:+.3f}",
+        )
 
     def _apply_autonomous_control_locked(self) -> AutonomousDecision:
         decision = self._evaluate_autonomous_locked()
@@ -1305,6 +1431,57 @@ class RuntimeState:
             "seq": self.control_seq,
         }
 
+    def current_lane_guidance_locked(self, *, now: float | None = None) -> LaneGuidance | None:
+        if self.lane_guidance is None:
+            return None
+        now = wall_time() if now is None else now
+        age = 0.0 if self.lane_guidance_at is None else max(0.0, now - self.lane_guidance_at)
+        return self.lane_guidance.with_age(age)
+
+    def current_lane_guidance(self) -> LaneGuidance | None:
+        with self.lock:
+            return self.current_lane_guidance_locked(now=wall_time())
+
+    def lane_snapshot_locked(self, *, now: float | None = None) -> dict[str, Any]:
+        now = wall_time() if now is None else now
+        guidance = self.current_lane_guidance_locked(now=now)
+        usable = False if guidance is None else guidance.is_usable(LANE_CONFIG)
+        if not LANE_CONFIG.enabled:
+            status = "disabled"
+        elif self.lane_error:
+            status = "error"
+        elif self.lane_assist_active:
+            status = "assisting"
+        elif usable:
+            status = "tracking"
+        elif guidance is not None and guidance.detected:
+            status = "weak"
+        else:
+            status = "searching"
+        return {
+            "enabled": LANE_CONFIG.enabled,
+            "status": status,
+            "usable": usable,
+            "assist_active": self.lane_assist_active,
+            "applied_correction": round(self.lane_assist_correction, 3),
+            "assist_reason": self.lane_assist_reason,
+            "frames": self.lane_frames,
+            "errors": self.lane_errors,
+            "error": self.lane_error,
+            "guidance": None if guidance is None else guidance.to_status(),
+            "config": {
+                "roi_top_ratio": LANE_CONFIG.roi_top_ratio,
+                "target_center_x": LANE_CONFIG.target_center_x,
+                "min_confidence": LANE_CONFIG.min_confidence,
+                "stale_sec": LANE_CONFIG.stale_sec,
+                "expected_lane_width_ratio": LANE_CONFIG.expected_lane_width_ratio,
+                "steering_gain": LANE_CONFIG.steering_gain,
+                "heading_gain": LANE_CONFIG.heading_gain,
+                "max_correction": LANE_CONFIG.max_correction,
+                "assist_actions": sorted(LANE_ASSIST_ACTIONS),
+            },
+        }
+
     def _note_operator_event_locked(
         self,
         event_type: str,
@@ -1402,6 +1579,7 @@ class RuntimeState:
                     "predictions": sanitize_predictions(self.predictions),
                     "backend": self.inference_backend,
                 },
+                "lane": self.lane_snapshot_locked(now=now),
                 "control": self.control_snapshot_locked(),
                 "autonomy": {
                     "mode": self.drive_mode,
@@ -1602,13 +1780,20 @@ def draw_status_overlay(
     udp = state_snapshot["udp"]
     control = state_snapshot["control"]
     autonomy = state_snapshot.get("autonomy", {}).get("decision", {})
+    lane = state_snapshot.get("lane", {})
+    lane_guidance = lane.get("guidance") or {}
+    lane_text = (
+        "off"
+        if not lane.get("enabled", False)
+        else f"{lane.get('status', '-')}/{lane_guidance.get('correction', 0):+.2f}"
+    )
     det = inf["detections"]
     latency = inf["latency_ms"]
     latency_text = "-" if latency is None else f"{latency}ms"
     if compact:
         lines = [
             f"f {context.seq}  det {det}  ia {inf['status']}",
-            f"{control['mode']} {control['steering']:.2f}/{control['throttle']:.2f}",
+            f"{control['mode']} {control['steering']:.2f}/{control['throttle']:.2f}  lane {lane_text}",
         ]
         scale = 0.42
         y = y0 + 26
@@ -1616,7 +1801,7 @@ def draw_status_overlay(
         lines = [
             f"frame {context.seq}  det {det}  ia {inf['status']}  {latency_text}",
             f"rx {udp['packets']}  tx {udp['tx_packets']}  cliente {udp['last_client'] or '-'}",
-            f"ctrl {control['mode']} {control['source']}  {control['steering']:.2f}/{control['throttle']:.2f}  auto {autonomy.get('action', '-')}",
+            f"ctrl {control['mode']} {control['source']}  {control['steering']:.2f}/{control['throttle']:.2f}  auto {autonomy.get('action', '-')}  lane {lane_text}",
         ]
         scale = 0.56
         y = y0 + 30
@@ -1653,6 +1838,10 @@ def build_stream_frame(state: RuntimeState) -> bytes:
             context.predictions,
             min_confidence=INFERENCE_MIN_CONFIDENCE,
         )
+
+    lane_guidance = state.current_lane_guidance()
+    if lane_guidance is not None:
+        frame = draw_lane_overlay(frame, lane_guidance, LANE_CONFIG)
 
     frame = draw_status_overlay(frame, context, snapshot)
     return encode_jpeg(frame)
@@ -2843,6 +3032,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         <div class="pill warn" id="pill-link"><span class="dot"></span><span class="label">4G</span><span class="val" id="pill-link-val">--</span></div>
         <div class="pill warn" id="pill-video"><span class="dot"></span><span class="label">Vídeo</span><span class="val" id="pill-video-val">--</span></div>
         <div class="pill warn" id="pill-ai"><span class="dot"></span><span class="label">IA</span><span class="val" id="pill-ai-val">--</span></div>
+        <div class="pill warn" id="pill-lane"><span class="dot"></span><span class="label">Carril</span><span class="val" id="pill-lane-val">--</span></div>
         <div class="pill bad" id="pill-control"><span class="dot"></span><span class="label">Control</span><span class="val" id="pill-control-val">OFF</span></div>
         <div class="pill warn" id="pill-recording"><span class="dot"></span><span class="label">Dataset</span><span class="val" id="pill-recording-val">OFF</span></div>
       </div>
@@ -2975,6 +3165,8 @@ LIVE_VIEW_HTML = r"""<!doctype html>
           <h2>Autonomía</h2>
           <div class="row"><span class="k">Modo</span><span class="v accent" id="auto-mode">--</span></div>
           <div class="row"><span class="k">Acción</span><span class="v" id="auto-action">--</span></div>
+          <div class="row"><span class="k">Carril</span><span class="v" id="auto-lane">--</span></div>
+          <div class="row"><span class="k">Corrección</span><span class="v muted" id="auto-lane-correction">--</span></div>
           <div class="row"><span class="k">Señal</span><span class="v" id="auto-target">--</span></div>
           <div class="row"><span class="k">Zona / Distancia</span><span class="v muted" id="auto-zone">--</span></div>
           <div class="row"><span class="k">Motivo</span><span class="v muted" id="auto-reason">--</span></div>
@@ -3018,6 +3210,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       pillLink: $('pill-link'),    pillLinkVal: $('pill-link-val'),
       pillVideo: $('pill-video'),  pillVideoVal: $('pill-video-val'),
       pillAi: $('pill-ai'),        pillAiVal: $('pill-ai-val'),
+      pillLane: $('pill-lane'),    pillLaneVal: $('pill-lane-val'),
       pillCtrl: $('pill-control'), pillCtrlVal: $('pill-control-val'),
       pillRec: $('pill-recording'), pillRecVal: $('pill-recording-val'),
       sessionClock: $('session-clock'),
@@ -3041,6 +3234,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       detections: $('detections'),
 
       autoMode: $('auto-mode'), autoAction: $('auto-action'),
+      autoLane: $('auto-lane'), autoLaneCorrection: $('auto-lane-correction'),
       autoTarget: $('auto-target'), autoZone: $('auto-zone'), autoReason: $('auto-reason'),
 
       recTag: $('rec-tag'), recSession: $('rec-session'), recRecords: $('rec-records'),
@@ -3406,6 +3600,26 @@ LIVE_VIEW_HTML = r"""<!doctype html>
           }
         }
 
+        /* lane assist */
+        const lane = data.lane || {};
+        const laneGuidance = lane.guidance || {};
+        if (!lane.enabled) {
+          setPillState(els.pillLane, 'warn');
+          els.pillLaneVal.textContent = 'OFF';
+        } else if (lane.assist_active) {
+          setPillState(els.pillLane, 'ok');
+          els.pillLaneVal.textContent = 'ASSIST';
+        } else if (lane.usable) {
+          setPillState(els.pillLane, 'ok');
+          els.pillLaneVal.textContent = 'OK';
+        } else if (laneGuidance.detected) {
+          setPillState(els.pillLane, 'warn');
+          els.pillLaneVal.textContent = 'DÉBIL';
+        } else {
+          setPillState(els.pillLane, 'bad');
+          els.pillLaneVal.textContent = 'SIN';
+        }
+
         /* control + autonomy pills + values */
         renderMode(data.control.mode || 'manual');
         const autoDecision = (data.autonomy && data.autonomy.decision) || {};
@@ -3445,6 +3659,14 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         }[autoDecision.action] || (autoDecision.action || '--');
         els.autoAction.textContent = actionEs;
         const tgt = autoDecision.target;
+        els.autoLane.textContent = !lane.enabled
+          ? 'off'
+          : laneGuidance.detected
+            ? ((lane.assist_active ? 'activo · ' : '') + laneGuidance.source + ' · ' + (Number(laneGuidance.confidence || 0) * 100).toFixed(0) + '%')
+            : (lane.status || '--');
+        const laneCorrection = lane.applied_correction != null ? lane.applied_correction : laneGuidance.correction;
+        els.autoLaneCorrection.textContent =
+          laneCorrection == null ? '--' : (Number(laneCorrection).toFixed(3) + ' · ' + (lane.assist_reason || laneGuidance.reason || '--'));
         els.autoTarget.textContent = tgt ? ('#' + (tgt.track_id ?? '-') + ' · ' + tgt.class + ' · ' + (Number(tgt.confidence)*100).toFixed(0) + '%') : '--';
         els.autoZone.textContent = tgt ? (tgt.zone + ' · ' + tgt.distance + ' · ' + (tgt.estimated_distance == null ? '--' : Number(tgt.estimated_distance).toFixed(2))) : '--';
         els.autoReason.textContent = (autoDecision.state ? autoDecision.state + ' · ' : '') + (autoDecision.reason || '--');

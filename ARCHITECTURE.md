@@ -13,7 +13,7 @@ TP2 runs as a four-machine lab, but the current critical path is script-based an
 
 1. Car attaches to LTE and gets UE IP from EPC. The previous fixed target was `172.16.0.2`; the live EPC HSS was observed on `2026-04-27` with dynamic allocation and the active session at `172.16.0.4`.
 2. Car sends UDP payloads (image/battery/runtime) to EPC control server.
-3. EPC script computes steering/throttle in either manual web mode or autonomous mode.
+3. EPC script computes steering/throttle in either manual web mode or autonomous mode. In autonomous mode, traffic-sign decisions remain Roboflow-driven and `lane_detector.py` adds a bounded OpenCV lane correction from the blue/green tape lines when the car is moving forward.
 4. EPC sends UDP control packet back to car.
 
 This path works without introducing a new backend API layer.
@@ -78,6 +78,7 @@ This path works without introducing a new backend API layer.
   - `coche.py` exposes annotated live video, remote manual control, autonomous mode, and inference/control status from EPC on `8088/TCP`
   - browser control updates EPC state only; EPC remains the only host that sends UDP commands to the car
   - autonomous driving is an EPC-local decision layer over Roboflow detections; it performs temporal tracking, sign selection, stateful maneuvers, and command smoothing without moving orchestration to Jetson or the car
+  - lane assistance is EPC-local OpenCV processing over the same camera frames; it detects the blue/green tape corridor on the black carpet and reports status/correction through `/status.json`
   - session recording is also EPC-local and stores candidate frames, annotated MP4 video, predictions, critical flags, reviewed-label sidecars, and autonomous estimates for dataset improvement under the configured recording directory
   - offline session replay/relabeling stays in `servicios/session_replayer.py`; it does not become a runtime service in the control path
 - Inference transport:
@@ -91,6 +92,7 @@ Inference is consumed by EPC through:
 
 - `coche.py` (live frame sender and annotation owner)
 - `autonomous_driver.py` (deterministic traffic-sign controller used by `coche.py`: tracker, distance proxy, FSM, safety fallback)
+- `lane_detector.py` (classical OpenCV lane-corridor detector used only as steering stabilization in `coche.py`)
 - `inferencia.py` (CLI test and annotated output)
 - `start_local_inference_server.py` (optional EPC local fallback endpoint)
 

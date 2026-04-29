@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from autonomous_driver import AutonomousDecision
@@ -115,6 +116,23 @@ class RuntimeStateModeTest(unittest.TestCase):
         self.assertEqual(control["steering_trim"], STEERING_TRIM)
         self.assertEqual(control["effective_steering"], corrected_steering(NEUTRAL_STEERING))
         self.assertLess(control["effective_steering"], control["steering"])
+
+    def test_autonomous_mode_applies_lane_correction_when_cruising(self):
+        state = RuntimeState()
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[:, :] = (22, 22, 24)
+        cv2.line(frame, (300, 440), (320, 180), (220, 220, 35), 14, cv2.LINE_AA)
+        cv2.line(frame, (570, 440), (520, 180), (220, 220, 35), 14, cv2.LINE_AA)
+
+        seq = state.update_frame(frame)
+        state.set_predictions(seq, [], 1)
+        result = state.set_drive_mode("autonomous")
+
+        self.assertTrue(result["control"]["armed"])
+        self.assertLess(result["control"]["steering"], NEUTRAL_STEERING)
+        lane = state.snapshot()["lane"]
+        self.assertTrue(lane["assist_active"])
+        self.assertLess(lane["applied_correction"], 0.0)
 
 
 class CriticalFrameAnalyzerTest(unittest.TestCase):
