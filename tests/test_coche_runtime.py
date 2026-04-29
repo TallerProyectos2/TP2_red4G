@@ -134,6 +134,26 @@ class RuntimeStateModeTest(unittest.TestCase):
         self.assertTrue(lane["assist_active"])
         self.assertLess(lane["applied_correction"], 0.0)
 
+    def test_lane_assist_does_not_compete_with_open_turns(self):
+        state = RuntimeState()
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[:, :] = (22, 22, 24)
+        cv2.line(frame, (300, 440), (320, 180), (220, 220, 35), 14, cv2.LINE_AA)
+        cv2.line(frame, (570, 440), (520, 180), (220, 220, 35), 14, cv2.LINE_AA)
+        state.update_frame(frame)
+        state.set_drive_mode("autonomous")
+        turn = decision(
+            action="turn-right",
+            state="turn-right",
+            reason="turn-test",
+        )
+
+        adjusted = state._apply_lane_assist_locked(turn, 1.0)
+
+        self.assertEqual(adjusted.steering, turn.steering)
+        self.assertFalse(state.lane_assist_active)
+        self.assertEqual(state.lane_assist_reason, "action-turn-right")
+
 
 class CriticalFrameAnalyzerTest(unittest.TestCase):
     def test_low_confidence_and_class_change_are_flagged(self):

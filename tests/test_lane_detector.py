@@ -21,6 +21,20 @@ def lane_frame(lines: list[tuple[int, int]], *, color=CYAN_BGR) -> np.ndarray:
     return frame
 
 
+def blank_frame() -> np.ndarray:
+    frame = np.zeros(FRAME_SHAPE, dtype=np.uint8)
+    frame[:, :] = (22, 22, 24)
+    return frame
+
+
+def partial_right_lane_frame() -> np.ndarray:
+    frame = blank_frame()
+    cv2.line(frame, (-18, 300), (22, 210), CYAN_BGR, 10, cv2.LINE_AA)
+    cv2.line(frame, (96, 468), (205, 168), CYAN_BGR, 18, cv2.LINE_AA)
+    cv2.line(frame, (692, 440), (542, 168), CYAN_BGR, 16, cv2.LINE_AA)
+    return frame
+
+
 class LaneDetectorTest(unittest.TestCase):
     def config(self) -> LaneDetectorConfig:
         return LaneDetectorConfig(
@@ -60,6 +74,18 @@ class LaneDetectorTest(unittest.TestCase):
         self.assertGreater(guidance.lane_center_lower, 0.5)
         self.assertLess(guidance.correction, 0.0)
 
+    def test_partial_edge_lane_selects_current_corridor(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(partial_right_lane_frame(), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertEqual(guidance.source, "pair")
+        self.assertEqual(guidance.reason, "partial-edge-lane-pair")
+        self.assertGreaterEqual(guidance.line_count, 3)
+        self.assertGreater(guidance.lane_center_lower, 0.5)
+        self.assertLess(guidance.correction, 0.0)
+
     def test_single_line_uses_recent_lane_width_with_lower_confidence(self):
         detector = LaneDetector(self.config())
         first = detector.detect(lane_frame([(210, 250), (450, 405)]), now=1.0)
@@ -71,6 +97,19 @@ class LaneDetectorTest(unittest.TestCase):
         self.assertIn(guidance.source, {"single-right", "single-left"})
         self.assertGreater(guidance.confidence, 0.0)
         self.assertLess(guidance.confidence, first.confidence)
+
+    def test_recent_memory_expires_from_original_detection(self):
+        detector = LaneDetector(self.config())
+        first = detector.detect(lane_frame([(210, 250), (450, 405)]), now=1.0)
+        self.assertTrue(first.detected)
+
+        recent = detector.detect(blank_frame(), now=1.1)
+        expired = detector.detect(blank_frame(), now=1.31)
+
+        self.assertTrue(recent.detected)
+        self.assertEqual(recent.source, "memory")
+        self.assertFalse(expired.detected)
+        self.assertEqual(expired.source, "none")
 
     def test_overlay_preserves_frame_shape(self):
         config = self.config()

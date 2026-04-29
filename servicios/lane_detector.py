@@ -28,6 +28,7 @@ class LaneDetectorConfig:
     cluster_px_ratio: float = 0.055
     min_lane_width_ratio: float = 0.18
     max_lane_width_ratio: float = 0.72
+    max_partial_lane_width_ratio: float = 0.92
     expected_lane_width_ratio: float = 0.38
     single_line_confidence_scale: float = 0.58
     stale_sec: float = 0.45
@@ -152,13 +153,16 @@ class LaneDetector:
         elif len(lines) == 1:
             guidance = self._single_line_guidance(lines[0], frame.shape, now)
 
+        reused_memory = False
         if not guidance.detected:
             guidance = self._reuse_recent(now, guidance.reason)
+            reused_memory = guidance.detected and guidance.source == "memory"
 
         if guidance.detected:
             guidance = self._smooth(guidance)
-            self.last_guidance = guidance
-            self.last_detected_at = now
+            if not reused_memory:
+                self.last_guidance = guidance
+                self.last_detected_at = now
         else:
             self.last_correction = move_towards(self.last_correction, 0.0, self.config.max_correction)
         return guidance
@@ -341,8 +345,8 @@ def extract_lane_lines(
         if fit_error > max_fit_error_px:
             continue
 
-        x_lower = clamp((slope * lower_y + intercept) / w, 0.0, 1.0)
-        x_upper = clamp((slope * upper_y + intercept) / w, 0.0, 1.0)
+        x_lower = sample_line_x(points, lower_y, slope, intercept, h, w)
+        x_upper = sample_line_x(points, upper_y, slope, intercept, h, w)
         height_ratio = clamp(bh / h, 0.0, 1.0)
         area_ratio = clamp(area / float(h * w), 0.0, 1.0)
         fit_score = 1.0 - clamp(fit_error / max_fit_error_px, 0.0, 1.0)
@@ -410,21 +414,37 @@ def build_guidance(
         return empty_guidance("need-two-lines", tuple(lines))
 
     target = config.target_center_x
-    pairs: list[tuple[float, LaneLine, LaneLine, float]] = []
+    pairs: list[tuple[float, LaneLine, LaneLine, float, str]] = []
     for left, right in zip(lines, lines[1:]):
         width = right.x_lower - left.x_lower
-        if width < config.min_lane_width_ratio or width > config.max_lane_width_ratio:
+        if width < config.min_lane_width_ratio:
             continue
         center = (left.x_lower + right.x_lower) / 2.0
         brackets_target = left.x_lower <= target <= right.x_lower
-        bracket_bonus = -1.0 if brackets_target else 0.0
-        score = bracket_bonus + abs(center - target) + abs(width - config.expected_lane_width_ratio) * 0.20
-        pairs.append((score, left, right, width))
+        edge_partial = brackets_target and (
+            left.x_lower <= 0.04
+            or left.x_upper <= 0.05
+            or right.x_lower >= 0.96
+            or right.x_upper >= 0.95
+        )
+        max_width = (
+            config.max_partial_lane_width_ratio
+            if edge_partial
+            else config.max_lane_width_ratio
+        )
+        if width > max_width:
+            continue
+        reason = "partial-edge-lane-pair" if width > config.max_lane_width_ratio else "lane-pair"
+        bracket_penalty = 0.0 if brackets_target else 0.65
+        width_penalty = abs(width - config.expected_lane_width_ratio) * (0.10 if edge_partial else 0.20)
+        confidence_bonus = -0.05 * min(left.confidence, right.confidence)
+        score = bracket_penalty + abs(center - target) + width_penalty + confidence_bonus
+        pairs.append((score, left, right, width, reason))
 
     if not pairs:
         return empty_guidance("no-plausible-lane-width", tuple(lines))
 
-    _score, left, right, width = min(pairs, key=lambda item: item[0])
+    _score, left, right, width, reason = min(pairs, key=lambda item: item[0])
     center_lower = (left.x_lower + right.x_lower) / 2.0
     center_upper = (left.x_upper + right.x_upper) / 2.0
     center_error = center_lower - target
@@ -451,10 +471,33 @@ def build_guidance(
         lane_width=width,
         line_count=len(lines),
         source="pair",
-        reason="lane-pair",
+        reason=reason,
         age_sec=0.0,
         lines=tuple(lines),
     )
+
+
+def sample_line_x(
+    points: np.ndarray,
+    sample_y: float,
+    slope: float,
+    intercept: float,
+    frame_h: int,
+    frame_w: int,
+) -> float:
+    if frame_h <= 0 or frame_w <= 0 or len(points) == 0:
+        return 0.0
+
+    xs = points[:, 0]
+    ys = points[:, 1]
+    band = max(6.0, frame_h * 0.025)
+    selected = np.abs(ys - sample_y) <= band
+    if not np.any(selected):
+        nearest_y = ys[int(np.argmin(np.abs(ys - sample_y)))]
+        selected = np.abs(ys - nearest_y) <= band
+    if np.any(selected):
+        return clamp(float(np.median(xs[selected])) / frame_w, 0.0, 1.0)
+    return clamp((slope * sample_y + intercept) / frame_w, 0.0, 1.0)
 
 
 def draw_lane_overlay(
