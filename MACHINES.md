@@ -113,7 +113,8 @@ Do not store passwords here.
   - autonomous decisions are computed on EPC; the car only executes received steering/throttle commands
 - Autostart note:
   - car-side runtime is started manually by operators
-  - EPC automation checks the car UE best-effort before publishing the `AM-Cloud` state, but does not block by default
+  - EPC automation checks the car UE best-effort before ensuring retained `AM-Cloud`, but does not block by default
+  - MQTT retained state is idempotent: if `1/command` already retains `AM-Cloud`, automation does not publish it again
   - EPC automation does not restart the car-side service unless `TP2_RESTART_CAR_ON_UP=1` is explicitly configured
 
 ## Ownership Rules

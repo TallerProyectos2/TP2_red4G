@@ -14,7 +14,9 @@ test -r /home/tp2/.config/srsran/epc.conf
 command -v srsepc >/dev/null
 command -v mosquitto >/dev/null
 command -v mosquitto_pub >/dev/null
+command -v mosquitto_sub >/dev/null
 test -d /home/tp2/TP2_red4G/servicios
+test -x /home/tp2/TP2_red4G/ops/bin/tp2-mqtt-ensure-car-mode
 systemctl list-unit-files ${TP2_EPC_SRSEPC_SERVICE} >/dev/null 2>&1
 systemctl list-unit-files ${TP2_EPC_CAR_CONTROL_SERVICE} >/dev/null 2>&1
 "

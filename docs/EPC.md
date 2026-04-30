@@ -66,7 +66,7 @@ Operational files are stored in repo `servicios/` and validated on EPC under `/h
   - `session_replayer.py` review server for frame replay and label correction, launchable from the `coche.py` web UI and backed by a session selector over the recording root
   - manual web control is gated by drive mode; stale manual posts cannot switch an active autonomous session back to manual
   - autonomous forward commands are clamped to non-negative throttle and default to `+0.65`
-  - outgoing UDP steering applies `TP2_STEERING_TRIM=-0.24` by default to compensate the current physical left drift; `/status.json` exposes `effective_steering`
+  - outgoing UDP steering applies live steering trim (`TP2_STEERING_TRIM=-0.24` default) to compensate the current physical left drift; `/status.json` exposes `effective_steering`, and the web UI can update trim with `POST /steering-trim`
   - lane assist defaults to enabled (`TP2_LANE_ASSIST_ENABLED=1`) and exposes `lane.status`, `lane.guidance`, and `lane.applied_correction` in `/status.json`; it accepts partially visible edge corridors, prefers the right corridor when several lanes are visible, and can apply up to `TP2_LANE_MAX_CORRECTION=0.75` while slowing during strong recovery.
   - autonomous inference submits frames every `0.07 s` by default when frames are available
   - autonomous sign filtering accepts smaller/farther signs by default (`TP2_AUTONOMOUS_MIN_AREA_RATIO=0.003`, `TP2_AUTONOMOUS_NEAR_AREA_RATIO=0.030`); STOP detections stop immediately and turn decisions begin earlier
@@ -93,6 +93,7 @@ Operational files are stored in repo `servicios/` and validated on EPC under `/h
 - `8088/TCP`: live `coche.py` operator web view with camera, browser control, and inference status
   - `POST /mode`: switch between `manual` and `autonomous`
   - `POST /recording`: start/stop dataset capture
+  - `POST /steering-trim`: update live steering compensation before UDP send
   - `GET /recording.json`: inspect current recording state
   - `POST /replayer/start`: start the session replayer on `TP2_SESSION_REPLAYER_PORT` (default `8090`)
 - `9001/TCP`: local inference endpoint (when started)

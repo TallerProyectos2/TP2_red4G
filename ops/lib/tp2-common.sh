@@ -31,6 +31,7 @@ tp2_load_config() {
   done
 
   : "${TP2_EPC_SSH:=tp2@100.97.19.112}"
+  : "${TP2_EPC_REPO_DIR:=/home/tp2/TP2_red4G}"
   : "${TP2_DEFAULT_PROFILE:=jetson}"
   : "${TP2_ENB_SSH:=tp2@10.10.10.2}"
   : "${TP2_ENB_SSH_FALLBACK:=}"
@@ -69,13 +70,19 @@ tp2_load_config() {
   : "${TP2_CHECK_CAR_WEB:=1}"
 
   : "${TP2_PUBLISH_CAR_MODE_ON_UP:=1}"
-  : "${TP2_MQTT_CLEAR_RETAINED_ON_UP:=1}"
-  : "${TP2_MQTT_RETAIN_COMMAND:=0}"
+  : "${TP2_MQTT_CLEAR_RETAINED_ON_UP:=0}"
+  : "${TP2_MQTT_RETAIN_COMMAND:=1}"
+  : "${TP2_MQTT_VERIFY_RETAINED:=1}"
+  : "${TP2_MQTT_FAIL_ON_CONFLICT:=0}"
   : "${TP2_MQTT_HOST:=172.16.0.1}"
   : "${TP2_MQTT_PORT:=1883}"
+  : "${TP2_MQTT_QOS:=1}"
   : "${TP2_MQTT_COMMAND_TOPIC:=1/command}"
   : "${TP2_MQTT_COMMAND_PAYLOAD:=AM-Cloud}"
   : "${TP2_MQTT_SUB_TIMEOUT_SEC:=2}"
+  : "${TP2_MQTT_CLIENT_ID_PREFIX:=tp2-g4-car-mode}"
+  : "${TP2_MQTT_LOCK_DIR:=/tmp/tp2-mqtt-car-mode.lock}"
+  : "${TP2_MQTT_LOCK_TIMEOUT_SEC:=10}"
 
   : "${TP2_WAIT_SSH_TIMEOUT_SEC:=20}"
   : "${TP2_SSH_CONNECT_TIMEOUT_SEC:=10}"
@@ -242,7 +249,7 @@ tp2_mqtt_retained_command_payload() {
   printf -v timeout_q "%q" "${TP2_MQTT_SUB_TIMEOUT_SEC}"
 
   tp2_remote_sh "${TP2_EPC_SSH}" "
-timeout ${timeout_q} mosquitto_sub -h ${host_q} -p ${port_q} -t ${topic_q} -C 1 2>/dev/null || true
+mosquitto_sub -h ${host_q} -p ${port_q} -t ${topic_q} --retained-only -W ${timeout_q} -C 1 2>/dev/null || true
 "
 }
 
@@ -274,28 +281,43 @@ tp2_prepare_car_mode_topic() {
 }
 
 tp2_publish_car_mode_once() {
-  [[ "${TP2_PUBLISH_CAR_MODE_ON_UP}" == "1" ]] || {
-    tp2_log "Skipping car mode publish because TP2_PUBLISH_CAR_MODE_ON_UP=0"
-    return 0
-  }
+  tp2_ensure_car_mode_state
+}
 
-  local host_q
-  local port_q
-  local topic_q
-  local payload_q
-  local retain_arg=""
+tp2_ensure_car_mode_state() {
+  local repo_q
+  local script_q
+  local assignments=()
+  local name
+  local value_q
 
-  printf -v host_q "%q" "${TP2_MQTT_HOST}"
-  printf -v port_q "%q" "${TP2_MQTT_PORT}"
-  printf -v topic_q "%q" "${TP2_MQTT_COMMAND_TOPIC}"
-  printf -v payload_q "%q" "${TP2_MQTT_COMMAND_PAYLOAD}"
-  if [[ "${TP2_MQTT_RETAIN_COMMAND}" == "1" ]]; then
-    retain_arg="-r "
-    tp2_warn "Publishing retained car mode because TP2_MQTT_RETAIN_COMMAND=1"
-  fi
+  printf -v repo_q "%q" "${TP2_EPC_REPO_DIR}"
+  printf -v script_q "%q" "${TP2_EPC_REPO_DIR}/ops/bin/tp2-mqtt-ensure-car-mode"
 
-  tp2_remote_sh "${TP2_EPC_SSH}" \
-    "mosquitto_pub -q 1 ${retain_arg}-h ${host_q} -p ${port_q} -t ${topic_q} -m ${payload_q}"
+  for name in \
+    TP2_PUBLISH_CAR_MODE_ON_UP \
+    TP2_MQTT_CLEAR_RETAINED_ON_UP \
+    TP2_MQTT_RETAIN_COMMAND \
+    TP2_MQTT_VERIFY_RETAINED \
+    TP2_MQTT_FAIL_ON_CONFLICT \
+    TP2_MQTT_HOST \
+    TP2_MQTT_PORT \
+    TP2_MQTT_QOS \
+    TP2_MQTT_COMMAND_TOPIC \
+    TP2_MQTT_COMMAND_PAYLOAD \
+    TP2_MQTT_SUB_TIMEOUT_SEC \
+    TP2_MQTT_CLIENT_ID_PREFIX \
+    TP2_MQTT_LOCK_DIR \
+    TP2_MQTT_LOCK_TIMEOUT_SEC; do
+    printf -v value_q "%q" "${!name}"
+    assignments+=("${name}=${value_q}")
+  done
+
+  tp2_remote_sh "${TP2_EPC_SSH}" "
+cd ${repo_q}
+test -x ${script_q}
+${assignments[*]} ${script_q}
+"
 }
 
 tp2_remote_has_process_cmd() {

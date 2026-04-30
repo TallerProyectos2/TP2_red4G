@@ -27,8 +27,9 @@ The manual order below remains the operational source for troubleshooting.
    - inference endpoint (`start_local_inference_server.py`) if local inference path is needed
    - live video/control web view from `coche.py` on `0.0.0.0:8088`
 9. Publish the current car mode when required:
-   - `mosquitto_pub -q 1 -h 172.16.0.1 -p 1883 -t 1/command -m "AM-Cloud"`
-   - Do not retain this command by default. `tp2-up` clears stale retained payloads before startup publish to avoid replaying `AM-Cloud` on every car MQTT reconnect.
+   - Normal automation runs `ops/bin/tp2-mqtt-ensure-car-mode`.
+   - It keeps `AM-Cloud` retained on `1/command`, verifies the retained value, and skips publishing when that retained state is already present.
+   - If another retained payload is found on the same topic, automation logs a conflict before replacing it unless `TP2_MQTT_FAIL_ON_CONFLICT=1`.
 10. Open the live operator view from Tailscale at `http://100.97.19.112:8088/`.
     - Keep manual mode selected for initial safety checks.
     - Switch to autonomous mode only after live frames, fresh inference status, and lane status are visible.
@@ -61,6 +62,7 @@ The manual order below remains the operational source for troubleshooting.
 - `coche.py` exposes `POST /mode` for `manual`/`autonomous`; autonomous mode falls back to neutral when frames or inference become stale.
 - Autonomous forward movement defaults to positive throttle `+0.65`; reverse throttle is not emitted by the autonomous controller.
 - UDP control output applies `TP2_STEERING_TRIM` before sending commands to the car. The default is `-0.24`, a stronger rightward correction for the current physical left drift; `/status.json` reports both requested `steering` and sent `effective_steering`.
+- The live web UI can change steering compensation through `POST /steering-trim`; the selected trim is added after autonomous/lane steering and before UDP send.
 - Lane assist is enabled by default with `TP2_LANE_ASSIST_ENABLED=1`; it detects the blue/green tape on the black carpet and applies a bounded correction up to `TP2_LANE_MAX_CORRECTION=0.75` only to autonomous forward actions. It prefers the right corridor when several lanes are visible, slows during strong lane recovery, and exposes `lane.status`, `lane.guidance` and `lane.applied_correction`.
 - Autonomous inference cadence defaults to `0.07 s` minimum spacing between submitted frames.
 - Autonomous sign selection accepts smaller/farther signs by default (`TP2_AUTONOMOUS_MIN_AREA_RATIO=0.003`, `TP2_AUTONOMOUS_NEAR_AREA_RATIO=0.030`); STOP detections stop immediately and turn actions can begin earlier.

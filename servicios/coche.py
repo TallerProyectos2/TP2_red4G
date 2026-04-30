@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import pickle
 import signal
@@ -218,8 +219,19 @@ def clamp(value: Any, minimum: float, maximum: float, default: float = 0.0) -> f
     return max(minimum, min(maximum, number))
 
 
-def corrected_steering(steering: float) -> float:
-    return round(clamp(float(steering) + STEERING_TRIM, -1.0, 1.0, NEUTRAL_STEERING), 3)
+def finite_float(value: Any, *, name: str = "value") -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid {name}") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"invalid {name}")
+    return number
+
+
+def corrected_steering(steering: float, steering_trim: float | None = None) -> float:
+    trim = STEERING_TRIM if steering_trim is None else finite_float(steering_trim, name="steering_trim")
+    return round(clamp(float(steering) + trim, -1.0, 1.0, NEUTRAL_STEERING), 3)
 
 
 def monotonic_ms() -> int:
@@ -1031,6 +1043,7 @@ class RuntimeState:
         self.control_armed = False
         self.control_source = "neutral"
         self.steering = NEUTRAL_STEERING
+        self.steering_trim = STEERING_TRIM
         self.throttle = NEUTRAL_THROTTLE
         self.control_updated_at = wall_time()
         self.control_seq = 0
@@ -1435,15 +1448,24 @@ class RuntimeState:
             self.control_seq += 1
             return self.control_snapshot_locked()
 
+    def set_steering_trim(self, value: Any) -> dict[str, Any]:
+        trim = round(finite_float(value, name="steering_trim"), 3)
+        with self.lock:
+            self.steering_trim = trim
+            self.control_updated_at = wall_time()
+            self.control_seq += 1
+            return self.control_snapshot_locked()
+
     def control_snapshot_locked(self) -> dict[str, Any]:
-        effective_steering = corrected_steering(self.steering)
+        effective_steering = corrected_steering(self.steering, self.steering_trim)
         return {
             "armed": self.control_armed,
             "source": self.control_source,
             "mode": self.drive_mode,
             "steering": self.steering,
             "effective_steering": effective_steering,
-            "steering_trim": STEERING_TRIM,
+            "steering_trim": self.steering_trim,
+            "steering_trim_default": STEERING_TRIM,
             "throttle": self.throttle,
             "updated_age_sec": max(0.0, wall_time() - self.control_updated_at),
             "seq": self.control_seq,
@@ -1761,8 +1783,10 @@ def send_control_packet(
     address: tuple[str, int],
     steering: float,
     throttle: float,
+    *,
+    steering_trim: float | None = None,
 ) -> None:
-    steering = corrected_steering(steering)
+    steering = corrected_steering(steering, steering_trim)
     payload = (
         struct.pack("c", b"C")
         + struct.pack("d", round(float(steering), 3))
@@ -1959,9 +1983,15 @@ def control_tx_loop(sock: socket.socket, state: RuntimeState) -> None:
         address = state.get_client_address()
         if address is None:
             continue
-        steering, throttle, _ = state.get_control()
+        steering, throttle, control = state.get_control()
         try:
-            send_control_packet(sock, address, steering, throttle)
+            send_control_packet(
+                sock,
+                address,
+                steering,
+                throttle,
+                steering_trim=control.get("steering_trim"),
+            )
             state.note_tx()
         except OSError as exc:
             state.note_packet("TX_ERROR", address, error=str(exc))
@@ -2058,6 +2088,30 @@ class LiveHandler(BaseHTTPRequestHandler):
             status = self.state.replayer.stop()
             status = self.state.replayer.snapshot(public_host=self.request_public_host())
             self.send_json({"ok": status.get("last_error") is None, "replayer": status})
+            return
+        if path in {"/steering-trim", "/steering-compensation"}:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(min(length, 8192)) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "invalid json"}, status=400)
+                return
+            if "trim" in payload:
+                trim_value = payload.get("trim")
+            elif "steering_trim" in payload:
+                trim_value = payload.get("steering_trim")
+            elif "value" in payload:
+                trim_value = payload.get("value")
+            else:
+                self.send_json({"ok": False, "error": "missing trim"}, status=400)
+                return
+            try:
+                control = self.state.set_steering_trim(trim_value)
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self.send_json({"ok": True, "control": control})
             return
         if path in {"/control/neutral", "/neutral"}:
             self.send_json({"ok": True, "control": self.state.release_manual_control("neutral")})
@@ -2199,9 +2253,15 @@ def handle_udp_packet(
     else:
         state.note_packet(packet_type, address, error="unknown packet type")
 
-    steering, throttle, _ = state.get_control()
+    steering, throttle, control = state.get_control()
     try:
-        send_control_packet(sock, address, steering, throttle)
+        send_control_packet(
+            sock,
+            address,
+            steering,
+            throttle,
+            steering_trim=control.get("steering_trim"),
+        )
         state.note_tx()
     except OSError as exc:
         state.note_packet("TX_ERROR", address, error=str(exc))
@@ -2920,6 +2980,76 @@ LIVE_VIEW_HTML = r"""<!doctype html>
     .row .v.red { color: var(--red); }
     .row .v.muted { color: var(--muted); }
 
+    .trim-panel {
+      display: grid;
+      gap: 12px;
+    }
+    .trim-readout {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .trim-readout .value {
+      font-family: var(--mono);
+      font-size: 28px;
+      line-height: 1;
+      color: var(--blue);
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .trim-readout .dir {
+      font-family: var(--mono);
+      color: var(--ink-2);
+      font-size: 12px;
+      text-align: right;
+    }
+    .trim-range {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+    .trim-range input[type="range"] {
+      width: 100%;
+      accent-color: var(--blue);
+    }
+    .trim-edit {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+    }
+    .trim-edit input {
+      min-width: 0;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--bg-1);
+      color: var(--ink);
+      padding: 0 10px;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .trim-edit button {
+      height: 36px;
+      border: 1px solid rgba(78,166,255,0.38);
+      border-radius: 6px;
+      background: rgba(78,166,255,0.08);
+      color: var(--blue);
+      padding: 0 12px;
+      font-family: var(--body);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .trim-edit button:hover { background: rgba(78,166,255,0.14); }
+
     /* sparkline */
     .spark-wrap {
       display: grid;
@@ -3195,6 +3325,27 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         </section>
 
         <section class="card">
+          <h2>Compensación <span class="tag" id="trim-tag">--</span></h2>
+          <div class="trim-panel">
+            <div class="trim-readout">
+              <span class="value" id="trim-value">0.000</span>
+              <span class="dir" id="trim-dir">sin compensación</span>
+            </div>
+            <label class="trim-range" for="trim-range">
+              <span>Der</span>
+              <input type="range" id="trim-range" min="-0.50" max="0.50" step="0.01" value="-0.08">
+              <span>Izq</span>
+            </label>
+            <div class="trim-edit">
+              <input type="number" id="trim-input" step="0.001" inputmode="decimal" value="-0.080" aria-label="Compensación de giro">
+              <button type="button" id="trim-base">Base</button>
+            </div>
+            <div class="row"><span class="k">Giro enviado</span><span class="v accent" id="trim-effective">--</span></div>
+            <div class="row"><span class="k">Giro solicitado</span><span class="v muted" id="trim-requested">--</span></div>
+          </div>
+        </section>
+
+        <section class="card">
           <h2>Dataset <span class="tag" id="rec-tag">OFF</span></h2>
           <div class="row"><span class="k">Sesión</span><span class="v muted" id="rec-session">--</span></div>
           <div class="row"><span class="k">Registros</span><span class="v" id="rec-records">0</span></div>
@@ -3259,6 +3410,10 @@ LIVE_VIEW_HTML = r"""<!doctype html>
       autoLane: $('auto-lane'), autoLaneCorrection: $('auto-lane-correction'),
       autoTarget: $('auto-target'), autoZone: $('auto-zone'), autoReason: $('auto-reason'),
 
+      trimTag: $('trim-tag'), trimValue: $('trim-value'), trimDir: $('trim-dir'),
+      trimRange: $('trim-range'), trimInput: $('trim-input'), trimBase: $('trim-base'),
+      trimEffective: $('trim-effective'), trimRequested: $('trim-requested'),
+
       recTag: $('rec-tag'), recSession: $('rec-session'), recRecords: $('rec-records'),
       recImages: $('rec-images'), recCritical: $('rec-critical'), recVideo: $('rec-video'), recReplayer: $('rec-replayer'), recError: $('rec-error'),
 
@@ -3277,6 +3432,8 @@ LIVE_VIEW_HTML = r"""<!doctype html>
     let lastSent = { steering: NEUTRAL_STEERING, throttle: 0.0 };
     let viewControl = { steering: NEUTRAL_STEERING, throttle: 0.0 };
     let manualNeutralPosted = true;
+    let trimDefault = -0.08;
+    let trimPostTimer = null;
 
     /* sparkline buffers */
     const LAT_BUF = [], FPS_BUF = [];
@@ -3351,6 +3508,50 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         throttle >  0.05 ? 'avanza · ' + Math.round(throttle * 100) + '%'
       : throttle < -0.05 ? (throttle < -0.7 ? 'freno fuerte' : 'retroceder · ' + Math.round(-throttle * 100) + '%')
       :                    'parado';
+    }
+
+    function trimDirection(trim) {
+      if (trim < -0.001) return 'derecha · ' + Math.abs(trim).toFixed(3);
+      if (trim > 0.001) return 'izquierda · ' + trim.toFixed(3);
+      return 'sin compensación';
+    }
+
+    function renderTrim(control) {
+      const trim = Number(control.steering_trim || 0);
+      trimDefault = Number(control.steering_trim_default ?? trimDefault);
+      els.trimTag.textContent = nfmt(trim, 3);
+      els.trimValue.textContent = nfmt(trim, 3);
+      els.trimDir.textContent = trimDirection(trim);
+      els.trimRange.value = clampNum(trim, Number(els.trimRange.min), Number(els.trimRange.max)).toFixed(2);
+      if (document.activeElement !== els.trimInput) {
+        els.trimInput.value = nfmt(trim, 3);
+      }
+      els.trimEffective.textContent = nfmt(control.effective_steering, 3);
+      els.trimRequested.textContent = nfmt(control.steering, 3);
+    }
+
+    async function postSteeringTrim(trim) {
+      if (!Number.isFinite(trim)) return;
+      try {
+        const res = await fetch('/steering-trim', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({trim}),
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error('http ' + res.status);
+      } catch (_) {
+        setPillState(els.pillCtrl, 'bad');
+      }
+    }
+
+    function scheduleSteeringTrim(rawValue) {
+      const trim = Number(rawValue);
+      if (!Number.isFinite(trim)) return;
+      els.trimValue.textContent = nfmt(trim, 3);
+      els.trimDir.textContent = trimDirection(trim);
+      if (trimPostTimer) clearTimeout(trimPostTimer);
+      trimPostTimer = setTimeout(() => postSteeringTrim(trim), 90);
     }
 
     /* highlight WASD on keypress */
@@ -3479,6 +3680,16 @@ LIVE_VIEW_HTML = r"""<!doctype html>
     els.stop.addEventListener('click', emergencyStop);
     els.record.addEventListener('click', toggleRecording);
     els.review.addEventListener('click', launchReplayer);
+    els.trimRange.addEventListener('input', () => {
+      els.trimInput.value = Number(els.trimRange.value).toFixed(3);
+      scheduleSteeringTrim(els.trimRange.value);
+    });
+    els.trimInput.addEventListener('input', () => scheduleSteeringTrim(els.trimInput.value));
+    els.trimInput.addEventListener('change', () => postSteeringTrim(Number(els.trimInput.value)));
+    els.trimBase.addEventListener('click', () => {
+      els.trimInput.value = trimDefault.toFixed(3);
+      scheduleSteeringTrim(trimDefault);
+    });
 
     /* manual control loop */
     setInterval(() => {
@@ -3661,6 +3872,7 @@ LIVE_VIEW_HTML = r"""<!doctype html>
         } else {
           renderControl(remoteSteer, remoteThr);
         }
+        renderTrim(data.control);
 
         /* autonomy card */
         els.autoMode.textContent = data.control.mode === 'autonomous' ? 'autónomo' : 'manual';

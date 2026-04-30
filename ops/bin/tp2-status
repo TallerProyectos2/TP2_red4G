@@ -22,6 +22,9 @@ hostname
 printf 'srsepc: '; systemctl is-active ${TP2_EPC_SRSEPC_SERVICE} 2>/dev/null || true
 printf 'srsepc cmd: '; if ps -eo pid=,args= | grep -F -- '${TP2_EPC_SRSEPC_CMD}' | grep -v -F 'grep -F --'; then :; else echo missing; fi
 printf 'mosquitto: '; systemctl is-active ${TP2_EPC_MQTT_SERVICE} 2>/dev/null || true
+printf 'mqtt retained ${TP2_MQTT_COMMAND_TOPIC}: '
+retained_payload="\$(mosquitto_sub -h ${TP2_MQTT_HOST} -p ${TP2_MQTT_PORT} -q ${TP2_MQTT_QOS} -i ${TP2_MQTT_CLIENT_ID_PREFIX}-status-\$\$ -t ${TP2_MQTT_COMMAND_TOPIC} --retained-only -W ${TP2_MQTT_SUB_TIMEOUT_SEC} -C 1 2>/dev/null || true)"
+if [[ -n "\${retained_payload}" ]]; then printf '%s\n' "\${retained_payload}"; else echo '<empty>'; fi
 printf 'local inference: '; systemctl is-active ${TP2_EPC_LOCAL_INFERENCE_SERVICE} 2>/dev/null || true
 printf 'car control: '; systemctl is-active ${TP2_EPC_CAR_CONTROL_SERVICE} 2>/dev/null || true
 printf 'S1 association: '; if ss -H -nA sctp | grep ESTAB | grep -F ':36412' | grep -F '${TP2_ENB_BACKHAUL_IP}:' >/dev/null; then echo established; else echo missing; fi

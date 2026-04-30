@@ -114,8 +114,26 @@ class RuntimeStateModeTest(unittest.TestCase):
         control = state.control_snapshot_locked()
 
         self.assertEqual(control["steering_trim"], STEERING_TRIM)
+        self.assertEqual(control["steering_trim_default"], STEERING_TRIM)
         self.assertEqual(control["effective_steering"], corrected_steering(NEUTRAL_STEERING))
         self.assertLess(control["effective_steering"], control["steering"])
+
+    def test_steering_trim_can_be_changed_live(self):
+        state = RuntimeState()
+
+        control = state.set_steering_trim(0.125)
+
+        self.assertEqual(control["steering_trim"], 0.125)
+        self.assertEqual(
+            control["effective_steering"],
+            corrected_steering(NEUTRAL_STEERING, 0.125),
+        )
+
+    def test_rejects_invalid_live_steering_trim(self):
+        state = RuntimeState()
+
+        with self.assertRaises(ValueError):
+            state.set_steering_trim("nan")
 
     def test_autonomous_mode_applies_lane_correction_when_cruising(self):
         state = RuntimeState()

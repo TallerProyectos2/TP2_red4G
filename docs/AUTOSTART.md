@@ -72,11 +72,11 @@ The EPC automation no longer blocks on UE IP detection by default because the mo
 7. Check the car UE path once: ping the configured `TP2_CAR_UE_IP` or inspect the latest EPC attach log for IMSI `901650000052126`. Continue when not confirmed unless `TP2_REQUIRE_CAR_UE=1`.
 8. Check the Jetson inference endpoint from EPC. If `TP2_JETSON_SSH` and `TP2_START_JETSON_INFERENCE=1` are configured, start `tp2-roboflow-inference.service` first.
 9. On EPC, start `tp2-local-inference.service` when local fallback is enabled.
-10. On EPC, start Mosquitto with `sudo systemctl start mosquitto`, then clear any stale retained payload on the car command topic when `TP2_MQTT_CLEAR_RETAINED_ON_UP=1`.
+10. On EPC, start Mosquitto with `sudo systemctl start mosquitto`.
 11. On EPC, start `tp2-car-control.service`.
 12. Re-check the car UE IP once before publishing `AM-Cloud`. Continue when not confirmed unless `TP2_REQUIRE_CAR_UE=1`. Restart the car-side systemd service only when `TP2_RESTART_CAR_ON_UP=1`.
 13. Check the EPC live video web endpoint.
-14. On EPC, publish `AM-Cloud` once with `mosquitto_pub -q 1` and no retained flag by default. The legacy `tp2-car-command-am-cloud.service` remains installable but is not the normal `tp2-up` publish path.
+14. On EPC, ensure the retained car mode with `ops/bin/tp2-mqtt-ensure-car-mode`. It publishes retained `AM-Cloud` only when the retained state is missing or different, then verifies the retained value. The legacy `tp2-car-command-am-cloud.service` now runs the same idempotent helper.
 
 Profiles:
 
@@ -144,6 +144,7 @@ ops/bin/tp2-status
 - operator URL over Tailscale: `http://100.97.19.112:8088/`
 - camera stream: `/video.mjpg`
 - control API: `POST /control` applies non-neutral browser commands only while the runtime is in `manual`; neutral manual posts stay unarmed; `POST /control/neutral` releases manual control without leaving `autonomous`; `POST /control/stop` forces manual neutral stop
+- steering trim API: `POST /steering-trim` changes the live compensation value used before UDP send
 - mode API: `POST /mode` switches between `manual` and `autonomous`; manual remains the safe startup mode
 - recording API: `POST /recording` starts/stops dataset capture; `GET /recording.json` reports output path and counters
 - safety timeout: `TP2_WEB_CONTROL_TIMEOUT_SEC` forces neutral when browser commands stop
