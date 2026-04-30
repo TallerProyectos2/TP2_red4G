@@ -35,6 +35,16 @@ def partial_right_lane_frame() -> np.ndarray:
     return frame
 
 
+def curved_lane_frame() -> np.ndarray:
+    frame = blank_frame()
+    ys = np.linspace(178, 442, 18)
+    left = np.array([[235 + 0.0018 * (y - 310) ** 2, y] for y in ys], dtype=np.int32)
+    right = np.array([[470 + 0.0015 * (y - 310) ** 2, y] for y in ys], dtype=np.int32)
+    cv2.polylines(frame, [left], False, CYAN_BGR, 16, cv2.LINE_AA)
+    cv2.polylines(frame, [right], False, CYAN_BGR, 16, cv2.LINE_AA)
+    return frame
+
+
 class LaneDetectorTest(unittest.TestCase):
     def config(self) -> LaneDetectorConfig:
         return LaneDetectorConfig(
@@ -85,6 +95,26 @@ class LaneDetectorTest(unittest.TestCase):
         self.assertGreaterEqual(guidance.line_count, 3)
         self.assertGreater(guidance.lane_center_lower, 0.5)
         self.assertLess(guidance.correction, 0.0)
+
+    def test_preferred_right_corridor_recovers_from_opposite_lane(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(lane_frame([(95, 140), (365, 350), (575, 545)]), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertEqual(guidance.reason, "preferred-right-lane-pair")
+        self.assertGreater(guidance.lane_center_lower, 0.7)
+        self.assertLess(guidance.correction, -0.25)
+
+    def test_curved_lane_stays_detected(self):
+        detector = LaneDetector(self.config())
+
+        guidance = detector.detect(curved_lane_frame(), now=1.0)
+
+        self.assertTrue(guidance.detected)
+        self.assertEqual(guidance.source, "pair")
+        self.assertLess(abs(guidance.center_error), 0.12)
+        self.assertLess(abs(guidance.correction), 0.18)
 
     def test_single_line_uses_recent_lane_width_with_lower_confidence(self):
         detector = LaneDetector(self.config())

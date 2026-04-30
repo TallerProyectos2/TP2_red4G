@@ -25,18 +25,23 @@ class LaneDetectorConfig:
     min_component_area_ratio: float = 0.00016
     min_line_height_ratio: float = 0.11
     max_fit_error_ratio: float = 0.055
+    max_curve_fit_error_ratio: float = 0.12
     cluster_px_ratio: float = 0.055
     min_lane_width_ratio: float = 0.18
     max_lane_width_ratio: float = 0.72
     max_partial_lane_width_ratio: float = 0.92
     expected_lane_width_ratio: float = 0.38
+    preferred_corridor: str = "right"
+    preferred_corridor_bonus: float = 1.05
     single_line_confidence_scale: float = 0.58
     stale_sec: float = 0.45
     min_confidence: float = 0.34
-    steering_gain: float = 0.78
-    heading_gain: float = 0.34
-    max_correction: float = 0.24
-    smoothing_alpha: float = 0.38
+    steering_gain: float = 2.10
+    heading_gain: float = 0.80
+    max_correction: float = 0.75
+    smoothing_alpha: float = 0.75
+    departure_center_error: float = 0.16
+    recovery_correction_scale: float = 1.55
 
 
 @dataclass(frozen=True)
@@ -316,6 +321,7 @@ def extract_lane_lines(
     min_area = max(8.0, config.min_component_area_ratio * h * w)
     min_height = max(12.0, config.min_line_height_ratio * h)
     max_fit_error_px = max(5.0, config.max_fit_error_ratio * w)
+    max_curve_fit_error_px = max(max_fit_error_px, config.max_curve_fit_error_ratio * w)
     lower_y = clamp(config.lower_sample_y, 0.0, 1.0) * h
     upper_y = clamp(config.upper_sample_y, 0.0, 1.0) * h
 
@@ -342,15 +348,19 @@ def extract_lane_lines(
             continue
         fitted = slope * ys + intercept
         fit_error = float(np.median(np.abs(xs - fitted)))
-        if fit_error > max_fit_error_px:
+        if fit_error > max_curve_fit_error_px:
             continue
 
         x_lower = sample_line_x(points, lower_y, slope, intercept, h, w)
         x_upper = sample_line_x(points, upper_y, slope, intercept, h, w)
         height_ratio = clamp(bh / h, 0.0, 1.0)
         area_ratio = clamp(area / float(h * w), 0.0, 1.0)
-        fit_score = 1.0 - clamp(fit_error / max_fit_error_px, 0.0, 1.0)
+        curved_fit = fit_error > max_fit_error_px
+        fit_limit = max_curve_fit_error_px if curved_fit else max_fit_error_px
+        fit_score = 1.0 - clamp(fit_error / fit_limit, 0.0, 1.0)
         confidence = clamp(0.20 + height_ratio * 1.35 + min(0.25, area_ratio * 35.0) + fit_score * 0.20, 0.0, 1.0)
+        if curved_fit:
+            confidence = clamp(confidence * 0.78, 0.0, 1.0)
         lines.append(
             LaneLine(
                 x_lower=x_lower,
@@ -414,8 +424,9 @@ def build_guidance(
         return empty_guidance("need-two-lines", tuple(lines))
 
     target = config.target_center_x
-    pairs: list[tuple[float, LaneLine, LaneLine, float, str]] = []
-    for left, right in zip(lines, lines[1:]):
+    adjacent_pairs = list(zip(lines, lines[1:]))
+    pairs: list[tuple[float, LaneLine, LaneLine, float, str, float, bool]] = []
+    for pair_index, (left, right) in enumerate(adjacent_pairs):
         width = right.x_lower - left.x_lower
         if width < config.min_lane_width_ratio:
             continue
@@ -438,13 +449,21 @@ def build_guidance(
         bracket_penalty = 0.0 if brackets_target else 0.65
         width_penalty = abs(width - config.expected_lane_width_ratio) * (0.10 if edge_partial else 0.20)
         confidence_bonus = -0.05 * min(left.confidence, right.confidence)
-        score = bracket_penalty + abs(center - target) + width_penalty + confidence_bonus
-        pairs.append((score, left, right, width, reason))
+        preference_bonus = corridor_preference_bonus(pair_index, len(adjacent_pairs), config)
+        score = bracket_penalty + abs(center - target) + width_penalty + confidence_bonus - preference_bonus
+        pairs.append((score, left, right, width, reason, preference_bonus, brackets_target))
 
     if not pairs:
         return empty_guidance("no-plausible-lane-width", tuple(lines))
 
-    _score, left, right, width, reason = min(pairs, key=lambda item: item[0])
+    _score, left, right, width, reason, preference_bonus, brackets_target = min(pairs, key=lambda item: item[0])
+    if (
+        reason == "lane-pair"
+        and preference_bonus > 0.0
+        and not brackets_target
+        and normalize_corridor(config.preferred_corridor) != "auto"
+    ):
+        reason = f"preferred-{normalize_corridor(config.preferred_corridor)}-lane-pair"
     center_lower = (left.x_lower + right.x_lower) / 2.0
     center_upper = (left.x_upper + right.x_upper) / 2.0
     center_error = center_lower - target
@@ -558,7 +577,36 @@ def draw_lane_overlay(
 
 def steering_correction(center_error: float, heading_error: float, config: LaneDetectorConfig) -> float:
     correction = -config.steering_gain * center_error - config.heading_gain * heading_error
+    if abs(center_error) >= config.departure_center_error:
+        correction *= max(1.0, config.recovery_correction_scale)
     return clamp(correction, -config.max_correction, config.max_correction)
+
+
+def corridor_preference_bonus(
+    pair_index: int,
+    pair_count: int,
+    config: LaneDetectorConfig,
+) -> float:
+    if pair_count < 2:
+        return 0.0
+    preferred = normalize_corridor(config.preferred_corridor)
+    bonus = max(0.0, config.preferred_corridor_bonus)
+    scale = max(1, pair_count - 1)
+    if preferred == "right":
+        return bonus * (pair_index / scale)
+    if preferred == "left":
+        return bonus * ((pair_count - 1 - pair_index) / scale)
+    if preferred == "center":
+        middle = (pair_count - 1) / 2.0
+        return bonus * (1.0 - min(1.0, abs(pair_index - middle) / max(middle, 1.0)))
+    return 0.0
+
+
+def normalize_corridor(value: str | None) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized in {"left", "right", "center"}:
+        return normalized
+    return "auto"
 
 
 def empty_guidance(reason: str, lines: tuple[LaneLine, ...] = ()) -> LaneGuidance:

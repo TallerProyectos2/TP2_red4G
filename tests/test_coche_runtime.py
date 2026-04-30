@@ -130,9 +130,11 @@ class RuntimeStateModeTest(unittest.TestCase):
 
         self.assertTrue(result["control"]["armed"])
         self.assertLess(result["control"]["steering"], NEUTRAL_STEERING)
+        self.assertEqual(result["control"]["throttle"], 0.35)
         lane = state.snapshot()["lane"]
         self.assertTrue(lane["assist_active"])
         self.assertLess(lane["applied_correction"], 0.0)
+        self.assertIn("recovery", lane["assist_reason"])
 
     def test_lane_assist_does_not_compete_with_open_turns(self):
         state = RuntimeState()

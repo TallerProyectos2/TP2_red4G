@@ -39,10 +39,10 @@ Normal sessions use one EPC runtime from `servicios/`:
   - operator toggles manual/autonomous from the same web UI
   - EPC uses fresh Roboflow detections to choose continue, turn, stop, crawl, slow, or faster cruise
   - autonomous forward movement uses positive throttle `+0.65`; stop, ambiguity, stale frame or stale inference still force neutral `0.0`
-  - outgoing UDP steering is trimmed by `TP2_STEERING_TRIM` before packet send; current default `-0.08` compensates the physical left drift with a small rightward correction
-  - `coche.py` also runs OpenCV lane assist on the camera frame: it detects the continuous blue/green tape lines on the carpet, estimates the current corridor, and applies a bounded steering correction only during autonomous forward actions
+  - outgoing UDP steering is trimmed by `TP2_STEERING_TRIM` before packet send; current default `-0.24` compensates the physical left drift with a stronger rightward correction
+  - `coche.py` also runs OpenCV lane assist on the camera frame: it detects the continuous blue/green tape lines on the carpet, estimates the current corridor, prefers the right corridor when several lanes are visible, slows during strong recovery, and applies a bounded steering correction only during autonomous forward actions
   - nearest/relevant signs are selected by bounding-box area, confidence, persistence, image zone (`left`, `center`, `right`), and maneuver state
-  - default sign thresholds are tuned to act on slightly smaller/farther signs, so STOP and turn decisions begin before the car reaches the sign
+  - default sign thresholds are tuned to act on slightly smaller/farther signs; STOP detections stop immediately and turn decisions begin before the car reaches the sign
   - detections are tracked across frames; default turn decisions trigger on the first valid confirmed frame to reduce reaction delay
   - the FSM holds stops, maintains 90-degree open-loop turns for the configured maneuver window, and applies cooldowns to avoid repeating the same sign
   - stale frame or stale inference state forces neutral instead of continuing on old detections

@@ -93,7 +93,7 @@ ENABLE_WEB_CONTROL = env_bool("TP2_ENABLE_WEB_CONTROL", True)
 ENABLE_INFERENCE = env_bool("TP2_ENABLE_INFERENCE", True)
 
 NEUTRAL_STEERING = env_float("TP2_NEUTRAL_STEERING", 0.25)
-STEERING_TRIM = env_float("TP2_STEERING_TRIM", -0.08)
+STEERING_TRIM = env_float("TP2_STEERING_TRIM", -0.24)
 NEUTRAL_THROTTLE = env_float("TP2_NEUTRAL_THROTTLE", 0.0)
 CONTROL_TIMEOUT_SEC = env_float("TP2_WEB_CONTROL_TIMEOUT_SEC", 0.45)
 CONTROL_TX_HZ = max(1.0, env_float("TP2_CONTROL_TX_HZ", 20.0))
@@ -166,19 +166,25 @@ LANE_CONFIG = LaneDetectorConfig(
     min_component_area_ratio=env_float("TP2_LANE_MIN_COMPONENT_AREA_RATIO", 0.00016),
     min_line_height_ratio=env_float("TP2_LANE_MIN_LINE_HEIGHT_RATIO", 0.11),
     max_fit_error_ratio=env_float("TP2_LANE_MAX_FIT_ERROR_RATIO", 0.055),
+    max_curve_fit_error_ratio=env_float("TP2_LANE_MAX_CURVE_FIT_ERROR_RATIO", 0.12),
     cluster_px_ratio=env_float("TP2_LANE_CLUSTER_PX_RATIO", 0.055),
     min_lane_width_ratio=env_float("TP2_LANE_MIN_WIDTH_RATIO", 0.18),
     max_lane_width_ratio=env_float("TP2_LANE_MAX_WIDTH_RATIO", 0.72),
     max_partial_lane_width_ratio=env_float("TP2_LANE_MAX_PARTIAL_WIDTH_RATIO", 0.92),
     expected_lane_width_ratio=env_float("TP2_LANE_EXPECTED_WIDTH_RATIO", 0.38),
+    preferred_corridor=os.getenv("TP2_LANE_PREFERRED_CORRIDOR", "right"),
+    preferred_corridor_bonus=env_float("TP2_LANE_PREFERRED_CORRIDOR_BONUS", 1.05),
     single_line_confidence_scale=env_float("TP2_LANE_SINGLE_LINE_CONFIDENCE_SCALE", 0.58),
     stale_sec=env_float("TP2_LANE_STALE_SEC", 0.45),
     min_confidence=env_float("TP2_LANE_MIN_CONFIDENCE", 0.34),
-    steering_gain=env_float("TP2_LANE_STEERING_GAIN", 0.78),
-    heading_gain=env_float("TP2_LANE_HEADING_GAIN", 0.34),
-    max_correction=env_float("TP2_LANE_MAX_CORRECTION", 0.24),
-    smoothing_alpha=env_float("TP2_LANE_SMOOTHING_ALPHA", 0.38),
+    steering_gain=env_float("TP2_LANE_STEERING_GAIN", 2.10),
+    heading_gain=env_float("TP2_LANE_HEADING_GAIN", 0.80),
+    max_correction=env_float("TP2_LANE_MAX_CORRECTION", 0.75),
+    smoothing_alpha=env_float("TP2_LANE_SMOOTHING_ALPHA", 0.75),
+    departure_center_error=env_float("TP2_LANE_DEPARTURE_CENTER_ERROR", 0.16),
+    recovery_correction_scale=env_float("TP2_LANE_RECOVERY_CORRECTION_SCALE", 1.55),
 )
+LANE_RECOVERY_THROTTLE = env_float("TP2_LANE_RECOVERY_THROTTLE", 0.35)
 LANE_ASSIST_ACTIONS = env_csv_set(
     "TP2_LANE_ASSIST_ACTIONS",
     {"continue", "speed-30", "speed-90", "approach-stop", "confirming", "cooldown"},
@@ -1276,14 +1282,25 @@ class RuntimeState:
         steering = round(clamp(decision.steering + correction, -1.0, 1.0, NEUTRAL_STEERING), 3)
         raw_base = decision.raw_steering if decision.raw_steering is not None else decision.steering
         raw_steering = round(clamp(raw_base + correction, -1.0, 1.0, NEUTRAL_STEERING), 3)
+        throttle = decision.throttle
+        raw_throttle = decision.raw_throttle
+        recovery = abs(guidance.center_error) >= LANE_CONFIG.departure_center_error
+        if recovery:
+            throttle = round(clamp(min(decision.throttle, LANE_RECOVERY_THROTTLE), 0.0, 1.0, NEUTRAL_THROTTLE), 3)
+            if raw_throttle is not None:
+                raw_throttle = round(clamp(min(raw_throttle, LANE_RECOVERY_THROTTLE), 0.0, 1.0, NEUTRAL_THROTTLE), 3)
         self.lane_assist_active = True
         self.lane_assist_correction = round(correction, 3)
         self.lane_assist_reason = f"{guidance.source}:{guidance.reason}"
+        if recovery:
+            self.lane_assist_reason += ":recovery"
         return replace(
             decision,
             steering=steering,
+            throttle=throttle,
             raw_steering=raw_steering,
-            reason=f"{decision.reason};lane={guidance.source}:{correction:+.3f}",
+            raw_throttle=raw_throttle,
+            reason=f"{decision.reason};lane={guidance.source}:{correction:+.3f}{':recovery' if recovery else ''}",
         )
 
     def _apply_autonomous_control_locked(self) -> AutonomousDecision:
@@ -1477,6 +1494,9 @@ class RuntimeState:
                 "stale_sec": LANE_CONFIG.stale_sec,
                 "expected_lane_width_ratio": LANE_CONFIG.expected_lane_width_ratio,
                 "max_partial_lane_width_ratio": LANE_CONFIG.max_partial_lane_width_ratio,
+                "preferred_corridor": LANE_CONFIG.preferred_corridor,
+                "departure_center_error": LANE_CONFIG.departure_center_error,
+                "recovery_throttle": LANE_RECOVERY_THROTTLE,
                 "steering_gain": LANE_CONFIG.steering_gain,
                 "heading_gain": LANE_CONFIG.heading_gain,
                 "max_correction": LANE_CONFIG.max_correction,

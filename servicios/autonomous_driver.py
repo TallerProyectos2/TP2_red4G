@@ -445,17 +445,6 @@ class AutonomousController:
             )
 
         if target.label in SAFETY_SIGNS:
-            if target.distance == "far":
-                return self._decision(
-                    now,
-                    steering=self._steer_towards_zone(target, strength=0.12),
-                    throttle=min(self.config.crawl_throttle, self.speed_cap),
-                    action="approach-stop",
-                    state=STATE_APPROACH,
-                    reason=f"{target.label}:far-{target.zone}",
-                    target=target,
-                    candidates=tuple(observations),
-                )
             self.state = STATE_STOP_HOLD
             self.active_track_id = target.track_id
             self.stop_until = now + self.config.stop_hold_sec
@@ -467,7 +456,7 @@ class AutonomousController:
                 throttle=self.config.neutral_throttle,
                 action="stop",
                 state=STATE_STOP_HOLD,
-                reason=f"{target.label}:{target.distance}-{target.zone}",
+                reason=f"{target.label}:{target.distance}-{target.zone}:immediate",
                 target=target,
                 candidates=tuple(observations),
                 urgent=True,

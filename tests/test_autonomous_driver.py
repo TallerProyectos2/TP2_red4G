@@ -97,10 +97,11 @@ class AutonomousDriverTest(unittest.TestCase):
         self.assertEqual(slow.throttle, 0.65)
         self.assertEqual(fast.throttle, 0.65)
 
-    def test_far_stop_approaches_instead_of_full_stop(self):
+    def test_far_stop_stops_immediately(self):
         decision = self.decide([prediction(SIGN_STOP, x=320, width=50, height=50)])
-        self.assertEqual(decision.action, "approach-stop")
-        self.assertGreater(decision.throttle, self.config.neutral_throttle)
+        self.assertEqual(decision.action, "stop")
+        self.assertEqual(decision.throttle, self.config.neutral_throttle)
+        self.assertIn("immediate", decision.reason)
 
     def test_mid_distance_stop_triggers_before_sign_is_close(self):
         decision = self.decide([prediction(SIGN_STOP, x=320, width=65, height=65)])
@@ -121,7 +122,6 @@ class AutonomousDriverTest(unittest.TestCase):
     def test_forward_autonomous_actions_use_positive_065_throttle(self):
         decisions = [
             self.decide([]),
-            self.decide([prediction(SIGN_STOP, x=320, width=50, height=50)]),
             self.decide_confirmed([prediction(SIGN_TURN_LEFT, x=160, width=180, height=180)]),
             self.decide_confirmed([prediction(SIGN_SPEED_90, x=320, width=150, height=150)]),
         ]
