@@ -53,6 +53,9 @@ Do not store passwords here.
 - Services:
   - `srsenb`
   - `bladeRF`
+- Radio configuration:
+  - `/home/tp2/.config/srsran/enb.conf`
+  - Current eNodeB MIMO setting: LTE TM4 with `nof_ports = 2` for 2x2 MIMO on `bladeRF` (`2026-04-30`)
 - Known addresses:
   - EPC-side SSH/access IP: `10.10.10.2`
   - backhaul: `10.10.10.2`

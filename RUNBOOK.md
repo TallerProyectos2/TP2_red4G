@@ -16,7 +16,7 @@ The manual order below remains the operational source for troubleshooting.
 
 1. Validate EPC <-> eNodeB backhaul connectivity (`10.10.10.1` <-> `10.10.10.2`).
 2. Verify eNodeB can reach EPC over the backhaul. `tp2-enb-link.service` runs `/home/tp2/to_epc_link.sh` automatically at eNodeB boot and is not part of the session startup flow.
-3. On eNodeB, verify `bladeRF` is connected and load `/home/tp2/Descargas/hostedxA9.rbf` with `bladeRF-cli`.
+3. On eNodeB, verify `bladeRF` is connected, confirm `/home/tp2/.config/srsran/enb.conf` uses the intended radio profile, and load `/home/tp2/Descargas/hostedxA9.rbf` with `bladeRF-cli`. The current eNodeB profile is 2x2 MIMO with `tm = 4` and `nof_ports = 2`.
 4. Start `srsepc` on EPC.
 5. Start `srsenb` on eNodeB.
 6. Verify S1 setup is established.

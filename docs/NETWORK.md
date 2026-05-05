@@ -8,6 +8,11 @@
 
 This link carries S1 control and user-plane traffic between `srsepc` and `srsenb`.
 
+## Radio Access
+
+- eNodeB runtime config: `/home/tp2/.config/srsran/enb.conf`
+- Current radio profile (`2026-04-30`): 2x2 MIMO on `bladeRF` using LTE TM4 with `tm = 4` and `nof_ports = 2`.
+
 ## EPC Interfaces
 
 - `enp1s0` (backhaul): `10.10.10.1`
