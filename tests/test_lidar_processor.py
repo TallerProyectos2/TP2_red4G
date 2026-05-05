@@ -87,6 +87,14 @@ class LidarProcessorTest(unittest.TestCase):
         self.assertAlmostEqual(scan.points[0].y, 0.35, places=3)
         self.assertEqual(safety.status, "stop")
 
+    def test_flat_ranges_preserve_angles_when_some_values_are_infinite(self):
+        ranges = [float("inf")] * 360
+        ranges[10] = 0.35
+        scan = normalize_lidar_payload(ranges, received_at=10.0)
+
+        self.assertEqual(len(scan.points), 1)
+        self.assertAlmostEqual(scan.points[0].angle_deg, 10.0, places=1)
+
 
 if __name__ == "__main__":
     unittest.main()
